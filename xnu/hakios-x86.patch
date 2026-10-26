@@ -1,0 +1,579 @@
+diff --git a/bsd/dev/hakios_x86.h b/bsd/dev/hakios_x86.h
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/bsd/dev/hakios_x86.h
+@@ -0,0 +1,145 @@
++/*
++ * Copyright (c) 2026 HakiOS-x86 contributors. All rights reserved.
++ *
++ * HakiOS-x86 platform definitions for x86_64.
++ *
++ * This file defines the platform-level constants, boot arguments,
++ * and hardware addresses for the HakiOS-x86 target (QEMU q35 / real PC).
++ *
++ * APSL 2.0 — see NOTICE and COMPLIANCE.md.
++ */
++
++#ifndef _BSD_DEV_HAKIOS_X86_H_
++#define _BSD_DEV_HAKIOS_X86_H_
++
++#include <sys/types.h>
++
++/*
++ * Kernel command-line arguments parsed by the HakiOS-x86 platform expert.
++ * These are set by xnuloader and passed through BootArgs->CommandLine.
++ *
++ * cpus=N         Number of CPU cores to use (default: all detected)
++ * display=1      Enable VGA/Bochs display driver
++ * input=1        Enable keyboard/mouse input
++ * disk=1         Enable AHCI/virtio disk driver
++ * net=1          Enable E1000/virtio network driver
++ * audio=1        Enable HDA audio driver
++ * serial=1       Enable serial console output (COM1)
++ * acpi=1         Use ACPI for device discovery
++ * dt=1           Use device tree for device discovery
++ * var_store=1    Keep /private/var across reboots
++ * debug=1        Enable verbose kernel debugging
++ */
++
++struct hakios_boot_args {
++    int      cpus;
++    int      display;
++    int      input;
++    int      disk;
++    int      net;
++    int      audio;
++    int      serial;
++    int      acpi;
++    int      dt;
++    int      var_store;
++    int      debug;
++};
++
++/*
++ * QEMU q35 hardware addresses.
++ * These are standard PC I/O ports and MMIO regions.
++ */
++
++/* VGA text mode framebuffer */
++#define HAKIOS_VGA_TEXT_BASE    0xB8000
++#define HAKIOS_VGA_TEXT_WIDTH   80
++#define HAKIOS_VGA_TEXT_HEIGHT  25
++#define HAKIOS_VGA_TEXT_SIZE    (80 * 25 * 2)
++
++/* VGA graphics (VBE) framebuffer */
++#define HAKIOS_VGA_VBE_BASE     0xE0000000
++#define HAKIOS_VGA_VBE_WIDTH    1024
++#define HAKIOS_VGA_VBE_HEIGHT   768
++#define HAKIOS_VGA_VBE_DEPTH    32
++
++/* Bochs VBE extensions (dispi interface) */
++#define HAKIOS_VBE_DISPI_IOPORT 0x01CE
++#define HAKIOS_VBE_DISPI_DATA   0x01CF
++#define HAKIOS_VBE_DISPI_ID     0x01
++#define HAKIOS_VBE_DISPI_XRES   0x01
++#define HAKIOS_VBE_DISPI_YRES   0x02
++#define HAKIOS_VBE_DISPI_BPP    0x03
++#define HAKIOS_VBE_DISPI_ENABLE 0x04
++#define HAKIOS_VBE_DISPI_LFB    0x40
++
++/* PCI configuration space (conf1 mechanism) */
++#define HAKIOS_PCI_CONF_ADDR    0x0CF8
++#define HAKIOS_PCI_CONF_DATA    0x0CFC
++#define HAKIOS_PCI_CONF_ENABLE  0x80000000
++
++/* ISA I/O ports for i8042 keyboard controller */
++#define HAKIOS_KBD_DATA         0x60
++#define HAKIOS_KBD_STATUS       0x64
++#define HAKIOS_KBD_COMMAND       0x64
++
++/* Serial port (16550 UART, COM1) */
++#define HAKIOS_SERIAL_COM1      0x3F8
++#define HAKIOS_SERIAL_COM2      0x2F8
++
++/* AHCI base address (QEMU q35: 0xFD0E0000, or PCI BAR) */
++#define HAKIOS_AHCI_QEMU_BAR    0xFD0E0000
++
++/* E1000 NIC (QEMU default at PCI slot 3) */
++#define HAKIOS_E1000_QEMU_BAR   0xFD500000
++
++/* Intel HDA audio (QEMU default at PCI slot 4) */
++#define HAKIOS_HDA_QEMU_BAR     0xFD600000
++
++/* HPET (QEMU q35: 0xFED00000) */
++#define HAKIOS_HPET_BASE        0xFED00000
++
++/* Local APIC (default) */
++#define HAKIOS_LAPIC_BASE        0xFEE00000
++#define HAKIOS_IOAPIC_BASE       0xFEC00000
++
++/* RTC / CMOS */
++#define HAKIOS_RTC_PORT_INDEX   0x70
++#define HAKIOS_RTC_PORT_DATA    0x71
++
++/* PM timer (ACPI, I/O port) */
++#define HAKIOS_PM_TIMER_PORT    0x0800
++
++/*
++ * Helper: read/write I/O port
++ */
++static inline uint8_t
++hakios_inb(uint16_t port)
++{
++    uint8_t val;
++    __asm__ volatile ("inb %1, %0" : "=a"(val) : "d"(port));
++    return val;
++}
++
++static inline uint16_t
++hakios_inw(uint16_t port)
++{
++    uint16_t val;
++    __asm__ volatile ("inw %1, %0" : "=a"(val) : "d"(port));
++    return val;
++}
++
++static inline uint32_t
++hakios_inl(uint16_t port)
++{
++    uint32_t val;
++    __asm__ volatile ("inl %1, %0" : "=a"(val) : "d"(port));
++    return val;
++}
++
++static inline void
++hakios_outb(uint16_t port, uint8_t val)
++{
++    __asm__ volatile ("outb %0, %1" : : "a"(val), "d"(port));
++}
++
++static inline void
++hakios_outw(uint16_t port, uint16_t val)
++{
++    __asm__ volatile ("outw %0, %1" : : "a"(val), "d"(port));
++}
++
++static inline void
++hakios_outl(uint16_t port, uint32_t val)
++{
++    __asm__ volatile ("outl %0, %1" : : "a"(val), "d"(port));
++}
++
++#endif /* _BSD_DEV_HAKIOS_X86_H_ */
+diff --git a/config/hakios.x86_64 b/config/hakios.x86_64
+new file mode 100644
+index 0000000..b2c3d4e
+--- /dev/null
++++ b/config/hakios.x86_64
+@@ -0,0 +1,50 @@
++#
++# HakiOS x86_64 target configuration
++#
++# This file is used by XNU's build system when TARGET_CONFIGS=hakios
++# and ARCH_CONFIGS=X86_64.
++#
++
++# Platform name
++PLATFORM_NAME := hakios
++
++# Architecture
++ARCH_CONFIG := X86_64
++
++# Kernel configs for this target
++KERNEL_CONFIGS := DEVELOPMENT RELEASE DEBUG
++
++# HakiOS-specific compiler flags
++CFLAGS_HAKIOS := -DHAKIOS_X86 -DHAKIOS_PLATFORM -DHAKIOS_Q35
++
++# Our driver source files (relative to xnu-src/)
++# These are added to the kernel build
++HAKIOS_DRIVER_SRCS := \
++    bsd/dev/hakios.display.c \
++    bsd/dev/hakios.input.c \
++    bsd/dev/hakios.disk.c \
++    bsd/dev/hakios.net.c \
++    bsd/dev/hakios.audio.c \
++    bsd/dev/hakios.timer.c \
++    bsd/dev/hakios.serial.c \
++    bsd/dev/hakios.pci.c \
++    bsd/dev/hakios.platform.c
++
++# Add to the kernel's source list
++C_SOURCE_OBJS += $(HAKIOS_DRIVER_SRCS:.c=.o)
++
++# Include paths
++CFLAGS_HAKIOS += -I$(SRCROOT)/bsd/dev
++
++# Platform expert
++# We use a custom platform expert instead of the default Apple platform
++PLATFORM_EXPERT := hakios_platform
++
++# Boot argument parsing
++# XNU's i386 boot already parses "BootArgs" — we extend the parser
++# in hakios.platform.c to understand our arguments.
++
++# Link flags
++LDFLAGS_HAKIOS := -DHAKIOS_X86
++
++export CFLAGS_HAKIOS LDFLAGS_HAKIOS
+diff --git a/pexpert/x86/i386/hakios_platform.c b/pexpert/x86/i386/hakios_platform.c
+new file mode 100644
+index 0000000..c3d4e5f
+--- /dev/null
++++ b/pexpert/x86/i386/hakios_platform.c
+@@ -0,0 +1,220 @@
++/*
++ * Copyright (c) 2026 HakiOS-x86 contributors. All rights reserved.
++ *
++ * HakiOS-x86 Platform Expert for x86_64.
++ *
++ * This replaces Apple's default platform expert with one that
++ * understands the PC/x86_64 environment: ACPI, PCI, and standard
++ * PC hardware.
++ *
++ * APSL 2.0 — see NOTICE and COMPLIANCE.md.
++ */
++
++#include <machine/types.h>
++#include <mach/boolean.h>
++#include <kern/cpu_number.h>
++#include <vm/pmap.h>
++#include <pexpert/boot.h>
++#include <pexpert/platform.h>
++#include <pexpert/i386/boot.h>
++
++#include "hakios_x86.h"
++
++/* Forward declarations */
++static void hakios_platform_init(void);
++static void hakios_cpu_init(void);
++static void hakios_halt(void);
++static void hakios_panic_init(void);
++static void hakios_panic(const char *str);
++static void hakios_get_default_hostname(char *name, int len);
++static void hakios_set_debugger(uint32_t port, uint32_t baudrate);
++
++/* Global boot arguments parsed from the kernel command line */
++static struct hakios_boot_args hakios_args;
++
++/*
++ * Parse the HakiOS-x86 kernel command line.
++ * Called from the platform expert early in boot.
++ */
++void
++hakios_parse_cmdline(const char *cmdline)
++{
++    /* Defaults */
++    hakios_args.cpus = 0;      /* 0 = auto-detect */
++    hakios_args.display = 0;
++    hakios_args.input = 0;
++    hakios_args.disk = 0;
++    hakios_args.net = 0;
++    hakios_args.audio = 0;
++    hakios_args.serial = 1;    /* serial on by default */
++    hakios_args.acpi = 1;      /* ACPI by default on x86 */
++    hakios_args.dt = 0;
++    hakios_args.var_store = 0;
++    hakios_args.debug = 0;
++
++    if (cmdline == NULL)
++        return;
++
++    /* Parse simple "key=value" pairs separated by spaces */
++    const char *p = cmdline;
++    while (*p) {
++        /* Skip whitespace */
++        while (*p == ' ' || *p == '\t')
++            p++;
++        if (!*p)
++            break;
++
++        /* Compare each known argument */
++        if (strncmp(p, "cpus=", 5) == 0) {
++            hakios_args.cpus = simple_strtoul(p + 5, NULL, 10);
++        } else if (strncmp(p, "display=", 8) == 0) {
++            hakios_args.display = simple_strtoul(p + 8, NULL, 10);
++        } else if (strncmp(p, "input=", 6) == 0) {
++            hakios_args.input = simple_strtoul(p + 6, NULL, 10);
++        } else if (strncmp(p, "disk=", 5) == 0) {
++            hakios_args.disk = simple_strtoul(p + 5, NULL, 10);
++        } else if (strncmp(p, "net=", 4) == 0) {
++            hakios_args.net = simple_strtoul(p + 4, NULL, 10);
++        } else if (strncmp(p, "audio=", 6) == 0) {
++            hakios_args.audio = simple_strtoul(p + 6, NULL, 10);
++        } else if (strncmp(p, "serial=", 7) == 0) {
++            hakios_args.serial = simple_strtoul(p + 7, NULL, 10);
++        } else if (strncmp(p, "acpi=", 5) == 0) {
++            hakios_args.acpi = simple_strtoul(p + 5, NULL, 10);
++        } else if (strncmp(p, "dt=", 3) == 0) {
++            hakios_args.dt = simple_strtoul(p + 3, NULL, 10);
++        } else if (strncmp(p, "var_store=", 10) == 0) {
++            hakios_args.var_store = simple_strtoul(p + 10, NULL, 10);
++        } else if (strncmp(p, "debug=", 6) == 0) {
++            hakios_args.debug = simple_strtoul(p + 6, NULL, 10);
++        }
++
++        /* Skip to next argument */
++        while (*p && *p != ' ' && *p != '\t')
++            p++;
++    }
++
++    /* Initialize serial console early if requested */
++    if (hakios_args.serial) {
++        hakios_serial_init(HAKIOS_SERIAL_COM1);
++    }
++
++    if (hakios_args.debug) {
++        hakios_serial_puts("HakiOS-x86: debug mode enabled\n");
++    }
++}
++
++static void
++hakios_platform_init(void)
++{
++    /*
++     * Initialize the HakiOS-x86 platform.
++     * This is called from the platform expert during early boot.
++     */
++
++    /* Initialize the serial console (if not already done in cmdline parse) */
++    if (!hakios_args.serial) {
++        /* Still set up serial for panic output */
++        hakios_serial_init(HAKIOS_SERIAL_COM1);
++    }
++
++    hakios_serial_puts("HakiOS-x86: platform expert init\n");
++
++    /* Initialize PCI configuration space access */
++    hakios_pci_init();
++
++    /* Initialize HPET timer */
++    hakios_hpet_init(HAKIOS_HPET_BASE);
++
++    /* Initialize Local APIC and IOAPIC */
++    hakios_lapic_init(HAKIOS_LAPIC_BASE);
++    hakios_ioapic_init(HAKIOS_IOAPIC_BASE);
++
++    /* Initialize ACPI tables (if ACPI is enabled) */
++    if (hakios_args.acpi) {
++        hakios_acpi_init();
++    }
++
++    /* Initialize the display if requested */
++    if (hakios_args.display) {
++        hakios_display_init();
++    }
++
++    /* Initialize input if requested */
++    if (hakios_args.input) {
++        hakios_input_init();
++    }
++
++    /* Initialize disk driver if requested */
++    if (hakios_args.disk) {
++        hakios_disk_init();
++    }
++
++    /* Initialize network if requested */
++    if (hakios_args.net) {
++        hakios_net_init();
++    }
++
++    /* Initialize audio if requested */
++    if (hakios_args.audio) {
++        hakios_audio_init();
++    }
++
++    hakios_serial_puts("HakiOS-x86: platform init complete\n");
++}
++
++static void
++hakios_cpu_init(void)
++{
++    /*
++     * Initialize per-CPU state for x86_64.
++     * This sets up the Local APIC for the current CPU.
++     */
++    hakios_lapic_init(HAKIOS_LAPIC_BASE);
++}
++
++static void
++hakios_halt(void)
++{
++    /*
++     * Halt the system. Called on shutdown or panic.
++     */
++    hakios_serial_puts("HakiOS-x86: system halted\n");
++
++    /* Disable interrupts */
++    __asm__ volatile ("cli");
++
++    /* Halt loop */
++    for (;;) {
++        __asm__ volatile ("hlt");
++    }
++}
++
++static void
++hakios_panic_init(void)
++{
++    /* Ensure serial is initialized for panic output */
++    hakios_serial_init(HAKIOS_SERIAL_COM1);
++}
++
++static void
++hakios_panic(const char *str)
++{
++    hakios_serial_puts("\n\nHakiOS-x86 PANIC: ");
++    if (str) {
++        hakios_serial_puts(str);
++    }
++    hakios_serial_puts("\n\n");
++    hakios_halt();
++}
++
++static void
++hakios_get_default_hostname(char *name, int len)
++{
++    strlcpy(name, "hakios-x86", len);
++}
++
++static void
++hakios_set_debugger(uint32_t port, uint32_t baudrate)
++{
++    /* Set up serial debugger on the specified port */
++    hakios_serial_init(port);
++}
++
++/*
++ * Platform expert structure.
++ * This is what XNU uses to dispatch to our platform code.
++ */
++platform_ops_t hakios_platform_ops = {
++    .platform_init         = hakios_platform_init,
++    .cpu_init              = hakios_cpu_init,
++    .halt                  = hakios_halt,
++    .panic_init            = hakios_panic_init,
++    .panic                 = hakios_panic,
++    .get_default_hostname  = hakios_get_default_hostname,
++    .set_debugger          = hakios_set_debugger,
++};
++
++/* Return a pointer to our platform ops */
++platform_ops_t *
++hakios_get_platform_ops(void)
++{
++    return &hakios_platform_ops;
++}
+diff --git a/osfmk/x86_64/hakios_start.c b/osfmk/x86_64/hakios_start.c
+new file mode 100644
+index 0000000..d4e5f6a
+--- /dev/null
++++ b/osfmk/x86_64/hakios_start.c
+@@ -0,0 +1,85 @@
++/*
++ * Copyright (c) 2026 HakiOS-x86 contributors. All rights reserved.
++ *
++ * HakiOS-x86 kernel entry point glue for x86_64.
++ *
++ * This file is called by XNU's normal x86_64 startup code, after
++ * the boot loader has jumped into the kernel. It bridges the
++ * xnuloader BootArgs to XNU's standard boot arguments.
++ *
++ * APSL 2.0.
++ */
++
++#include <mach/vm_types.h>
++#include <mach/vm_param.h>
++#include <pexpert/i386/boot.h>
++#include <pexpert/i386/efi.h>
++
++#include "hakios_x86.h"
++
++/*
++ * This function is called from the assembly entry point (x86_64_start)
++ * after the initial page tables are set up. The boot_args pointer
++ * from xnuloader is passed in.
++ *
++ * We convert the HakiOS BootArgs into XNU's internal boot_args
++ * structure and then call the normal XNU startup path.
++ */
++void
++hakios_x86_64_init(boot_args *args)
++{
++    /*
++     * The boot_args structure was filled by xnuloader.
++     * It contains:
++     *   - Memory map (EFI memory map, converted)
++     *   - Video info (VGA mode)
++     *   - Command line pointer
++     *   - Kernel load address and size
++     *   - EFI runtime services table (for later use)
++     *
++     * We parse the command line first so the platform expert
++     * knows which drivers to initialize.
++     */
++
++    /* Parse our kernel command line */
++    if (args->CommandLine && args->CommandLineLength > 0) {
++        char *cmdline = (char *)(uintptr_t)args->CommandLine;
++        hakios_parse_cmdline(cmdline);
++    } else {
++        /* No command line — use defaults */
++        hakios_parse_cmdline(NULL);
++    }
++
++    /*
++     * Call the standard XNU x86_64 startup.
++     * This will:
++     *   1. Set up the VM system
++     *   2. Initialize the platform expert (which calls our
++     *      hakios_platform_init)
++     *   3. Start the scheduler
++     *   4. Call the BSD init (which starts launchd)
++     */
++    x86_64_init(args);
++}
++
++/*
++ * Simple string-to-unsigned-long for command line parsing.
++ * We can't use the standard library here, so we implement our own.
++ */
++unsigned long
++hakios_simple_strtoul(const char *cp, char **endp, unsigned int base)
++{
++    unsigned long result = 0;
++
++    if (base == 0) {
++        if (cp[0] == '0' && (cp[1] == 'x' || cp[1] == 'X')) {
++            base = 16;
++            cp += 2;
++        } else {
++            base = 10;
++        }
++    }
++
++    while (*cp) {
++        int digit;
++        if (*cp >= '0' && *cp <= '9')
++            digit = *cp - '0';
++        else if (*cp >= 'a' && *cp <= 'f')
++            digit = *cp - 'a' + 10;
++        else if (*cp >= 'A' && *cp <= 'F')
++            digit = *cp - 'A' + 10;
++        else
++            break;
++
++        if (digit >= (int)base)
++            break;
++
++        result = result * base + digit;
++        cp++;
++    }
++
++    if (endp)
++        *endp = (char *)cp;
++
++    return result;
++}

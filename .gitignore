@@ -1,0 +1,60 @@
+# .gitignore
+
+# iOS user space files (never distributed)
+*.ipsw
+*.dmg
+root.apfs
+system.apfs
+
+# Firmware (pulled from your own device, never distributed)
+fw-*/
+
+# Build artifacts
+xnu-src/
+xnu-deps/build/
+*.o
+*.a
+*.so
+*.dylib
+mach.development*
+mach.release*
+mach.debug*
+
+# Loader build artifacts
+xnuloader/build/
+xnuloader/*.efi
+xnuloader/identity.h
+
+# Prebuilt binaries (built, not committed — use GitHub Actions to rebuild)
+prebuilt/*.img
+prebuilt/mach.*
+prebuilt/xnuloader.efi
+prebuilt/libSystem.dylib
+!prebuilt/README.md
+
+# Python build artifacts
+__pycache__/
+*.pyc
+
+# Backup / device-specific
+backup/
+dtb/
+recovery/
+
+# User space build artifacts
+userland/build/
+userland/*.apfs
+
+# Logs
+logs/*.log
+logs/*.txt
+
+# OS-specific
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
