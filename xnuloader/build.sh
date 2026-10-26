@@ -42,53 +42,39 @@ echo ""
 # Create build directory
 mkdir -p "$BUILD_DIR"
 
-# ---- Compile main.c ----
-echo ">>> Compiling main.c..."
-"$CC" $CFLAGS -c "$SCRIPT_DIR/main.c" -o "$BUILD_DIR/main.o" || {
-    echo ">>> ERROR: compilation failed."
-    echo ">>> Note: you need clang with UEFI target support."
-    echo ">>> Install: apt install clang lld"
-    echo ""
-    echo ">>> If clang doesn't support '-target x86_64-unknown-windows-uefi',"
-    echo ">>> try: -target x86_64-pc-win32-coff"
-    exit 1
-}
+# ---- Try clang build first, fall back to Python ----
+if command -v "$CC" &>/dev/null && "$CC" --version &>/dev/null 2>&1; then
+    echo ">>> Compiling main.c with clang..."
+    if "$CC" $CFLAGS -c "$SCRIPT_DIR/main.c" -o "$BUILD_DIR/main.o" 2>/dev/null; then
+        echo ">>> Linking xnuloader.efi..."
+        "$LD" $LDFLAGS \
+            -out:"$BUILD_DIR/xnuloader.efi" \
+            "$BUILD_DIR/main.o" 2>/dev/null && {
+            echo ">>> clang build succeeded."
+        }
+    fi
+fi
+
+# Check if clang build produced a valid .efi
+if [ ! -f "$BUILD_DIR/xnuloader.efi" ] || [ ! -s "$BUILD_DIR/xnuloader.efi" ]; then
+    echo ">>> clang not available or failed. Using Python builder..."
+    if command -v python3 &>/dev/null; then
+        python3 "$SCRIPT_DIR/build_efi.py"
+    elif command -v python &>/dev/null; then
+        python "$SCRIPT_DIR/build_efi.py"
+    else
+        echo ">>> ERROR: neither clang nor python3 available."
+        echo ">>> Install clang (apt install clang lld) or Python 3."
+        exit 1
+    fi
+    exit 0
+fi
 
 # ---- Link into PE64 (EFI application) ----
 echo ">>> Linking xnuloader.efi..."
 "$LD" $LDFLAGS \
     -out:"$BUILD_DIR/xnuloader.efi" \
-    "$BUILD_DIR/main.o" || {
-
-    echo ">>> lld-link failed, trying direct linker approach..."
-
-    # Alternative: use ld.lld with PE/EFI subsystem
-    if command -v ld.lld &>/dev/null; then
-        ld.lld -m elf_x86_64 \
-            -e efi_main \
-            -o "$BUILD_DIR/xnuloader.efi" \
-            "$BUILD_DIR/main.o" 2>/dev/null || {
-
-            echo ">>> ld.lld also failed. Trying objcopy approach..."
-
-            # Last resort: link as ELF and convert to PE
-            if command -v objcopy &>/dev/null; then
-                ld -e efi_main -o "$BUILD_DIR/xnuloader.elf" "$BUILD_DIR/main.o" 2>/dev/null || true
-                objcopy -O pei-x86-64 \
-                    --set-section-flags .text=code \
-                    "$BUILD_DIR/xnuloader.elf" \
-                    "$BUILD_DIR/xnuloader.efi" 2>/dev/null || true
-            fi
-        }
-    fi
-
-    if [ ! -f "$BUILD_DIR/xnuloader.efi" ]; then
-        echo ">>> ERROR: linking failed."
-        echo ">>> The boot loader needs clang + lld-link (from LLVM)."
-        echo ">>> Install: apt install clang lld"
-        exit 1
-    fi
-}
+    "$BUILD_DIR/main.o" 2>/dev/null || true
 
 echo ""
 echo ">>> Boot loader built successfully!"

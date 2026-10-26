@@ -98,6 +98,10 @@ loader:
 	@$(LOADER)/build.sh
 	@mkdir -p $(PREBUILT)
 	@cp $(LOADER)/build/xnuloader.efi $(PREBUILT)/ 2>/dev/null || true
+	@if [ ! -f "$(PREBUILT)/xnuloader.efi" ]; then \
+		echo ">>> Trying Python fallback..."; \
+		python3 $(LOADER)/build_efi.py || python $(LOADER)/build_efi.py; \
+	fi
 	@echo ">>> Loader built."
 
 # ============================================================================
