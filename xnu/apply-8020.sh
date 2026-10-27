@@ -113,6 +113,10 @@ need_grep() {
     if grep -q "$2" "$SRC/$1" 2>/dev/null; then echo "    ok   $1 :: $2"
     else echo "    MISSING MARK  $1 :: $2"; fail=1; fi
 }
+need_absent() {
+    if grep -q "$2" "$SRC/$1" 2>/dev/null; then echo "    STILL PRESENT  $1 :: $2"; fail=1
+    else echo "    ok   $1 :: tanpa $2"; fi
+}
 
 # patch 0001
 need_file "pexpert/pexpert/arm64/TISSOT.h"
@@ -129,6 +133,10 @@ need_grep "osfmk/arm64/sleh.c" "pe_gic_ack_irq"
 # patch 0004 (availability.pl dari SDK host)
 need_grep "bsd/sys/make_symbol_aliasing.sh" "HAKIOS_HOST_SDK"
 need_grep "bsd/sys/make_symbol_aliasing.sh" "HAKIOS_STATIC_LIST"
+# patch 0005 (kompatibilitas clang baru)
+need_grep "makedefs/MakeInc.def" "Wno-missing-include-dirs"
+need_grep "makedefs/MakeInc.def" "Not every SDK ships usr/local/include/kernel"
+need_absent "makedefs/MakeInc.def" "enable-trivial-auto-var-init-zero"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

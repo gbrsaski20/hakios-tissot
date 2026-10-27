@@ -177,15 +177,16 @@ if [ -n "$PLATFORM_NAME" ]; then
     MAKE_CMD=("${MAKE_CMD[@]}" PLATFORM="$PLATFORM_NAME")
 fi
 
-# XNU sets WERROR := -Werror in makedefs/MakeInc.def. A clang much newer than
-# XNU 8020 (2021) turns new warnings on by default, which -Werror then promotes
-# to errors — masking the *real* build errors. Passing WERROR= on the command
-# line overrides the makefile assignment, so this is a genuine knob, not a hack.
+# XNU enables -Werror through BUILD_WERROR/USE_WERROR in makedefs/MakeInc.def
+# (USE_WERROR := 1 by default, WERROR := -Werror). A clang much newer than
+# XNU 8020 turns new warnings on by default (-Weverything), which -Werror then
+# promotes to errors — masking the *real* build errors. BUILD_WERROR=0 is the
+# knob XNU provides for this, so use it rather than blanking WERROR.
 #
 # NOTE: `arr+=(x)` is bash 4+ only and macOS still ships bash 3.2 as /bin/bash,
 # which is what GitHub's macOS runners use. Reassign instead.
 if [ "$NOWERROR" -eq 1 ]; then
-    MAKE_CMD=("${MAKE_CMD[@]}" WERROR=)
+    MAKE_CMD=("${MAKE_CMD[@]}" BUILD_WERROR=0)
 fi
 
 echo "  SDK    : ${SDK_PATH:-$SDK_NAME}"

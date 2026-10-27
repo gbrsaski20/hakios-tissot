@@ -1,0 +1,64 @@
+From: HakiOS <hakios@localhost>
+Subject: [PATCH 0005/5] makedefs: build with clang 17+ (Xcode 26)
+
+With the build finally reaching the compiler, three flags in MakeInc.def
+turned out to be incompatible with the clang shipped in Xcode 26:
+
+  1. -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+     was removed from clang. The flag right above it,
+     -ftrivial-auto-var-init=zero, already does the same job, so the legacy
+     alias is simply dropped.
+
+  2. -I$(SDKROOT)/usr/local/include/kernel points at a directory the
+     iPhoneOS SDK does not have (the SDK has no usr/local at all). Under
+     -Weverything + -Werror that becomes
+       clang: error: no such include directory ... [-Werror,-Wmissing-include-dirs]
+     The include is now added only when the directory exists, which keeps
+     the old behaviour for SDKs that do ship kernel headers.
+
+  3. -Wmissing-include-dirs fires for build-generated paths that do not
+     exist yet (e.g. BUILD/obj/EXPORT_HDRS/libsa). A missing -I directory
+     is harmless — a genuinely missing header still fails as
+     "file not found" — so the warning is disabled in the block that
+     already exists for exactly this purpose ("When a new clang has new
+     warnings disable them here until the kernel is fixed").
+
+Nothing here is tissot-specific.
+
+---
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -179,7 +179,8 @@
+ 	-Wno-anon-enum-enum-conversion \
+ 	-Wno-error=enum-enum-conversion \
+ 	-Wno-error=c99-designator \
+-	-Wno-error=reorder-init-list
++	-Wno-error=reorder-init-list \
++	-Wno-missing-include-dirs
+ 
+ # Hand-written sign conversion diagnostics are resolved, but the
+ # auto-generated ones need mig and iig to be updated to fix.  Disable the
+@@ -317,7 +318,6 @@
+ 	-fno-builtin \
+ 	-fno-common \
+ 	-ftrivial-auto-var-init=zero \
+-	-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang \
+ 	-fsigned-bitfields \
+ 	-fmerge-all-constants \
+ 	-fno-c++-static-destructors \
+@@ -918,7 +918,15 @@
+ INCFLAGS_EXTERN	= -I$(SRCROOT)/EXTERNAL_HEADERS
+ INCFLAGS_GEN	= -I$(SRCROOT)/$(COMPONENT) -I$(OBJROOT)/EXPORT_HDRS/$(COMPONENT)
+ INCFLAGS_LOCAL	= -I.
++# Not every SDK ships usr/local/include/kernel (the iPhoneOS SDK has no
++# usr/local at all). Pointing -I at a missing directory is harmless, but with
++# -Weverything + -Werror it becomes "no such include directory" and stops the
++# build, so only add it when it actually exists.
++ifneq ($(wildcard $(SDKROOT)/usr/local/include/kernel),)
+ INCFLAGS_SDK	= -I$(SDKROOT)/usr/local/include/kernel
++else
++INCFLAGS_SDK	=
++endif
+ 
+ INCFLAGS	= $(INCFLAGS_LOCAL) $(INCFLAGS_GEN) $(INCFLAGS_IMPORT) $(INCFLAGS_EXTERN) $(INCFLAGS_MAKEFILE) $(INCFLAGS_SDK)
+ 

@@ -19,8 +19,9 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0002-tissot-uart-console.patch` | Driver console BLSP1 UART1 @ `0x078AF000` (`ttyHSL0`): `SERIAL_TISSOT_UART`, offset register UARTDM, blok driver di `pe_serial.c` |
 | `patches-8020/0003-tissot-gicv2-interrupts.patch` | Driver **GIC-400 (GICv2)** + jalur ack/EOI MMIO. Tanpa ini `pe_init_fiq()` kosong dan kernel hang setelah beberapa baris UART |
 | `patches-8020/0004-availability-pl-host-sdk.patch` | `bsd/sys/make_symbol_aliasing.sh`: `availability.pl` sudah **tidak ada di Xcode 26** (tidak di SDK iPhoneOS, tidak di SDK macOS, tidak di `/usr/local`). Patch ini mencari target SDK -> host SDK -> daftar versi bawaan, supaya build tidak mati di `_symbol_aliasing.h` |
+| `patches-8020/0005-clang-modern-compat.patch` | Kompatibilitas clang Xcode 26: buang `-enable-trivial-auto-var-init-zero-...` (sudah dihapus dari clang, dan `-ftrivial-auto-var-init=zero` sudah ada di baris atasnya), jaga `-I$(SDKROOT)/usr/local/include/kernel` dengan `wildcard`, matikan `-Wmissing-include-dirs` |
 
-## Kenapa empat patch itu perlu
+## Kenapa lima patch itu perlu
 
 **0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
 ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
