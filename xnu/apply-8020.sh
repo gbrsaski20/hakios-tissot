@@ -126,6 +126,8 @@ need_grep "pexpert/pexpert/arm64/TISSOT.h" "TISSOT_GIC_V2"
 need_grep "pexpert/arm/pe_fiq.c" "tissot_gic_init_distributor"
 need_grep "pexpert/arm/pe_fiq.c" "pe_gic_ack_irq"
 need_grep "osfmk/arm64/sleh.c" "pe_gic_ack_irq"
+# patch 0004 (availability.pl dari SDK host)
+need_grep "bsd/sys/make_symbol_aliasing.sh" "HAKIOS_HOST_SDK"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

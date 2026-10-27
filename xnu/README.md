@@ -18,8 +18,9 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0001-add-tissot-board-config.patch` | Board config `TISSOT`: masuk `SUPPORTED_ARM64_MACHINE_CONFIGS`, `-mcpu=cortex-a53`, **`arm64` bukan `arm64e`** (Cortex-A53 tidak punya PAC), `TISSOT.h`, blok `board_config.h` |
 | `patches-8020/0002-tissot-uart-console.patch` | Driver console BLSP1 UART1 @ `0x078AF000` (`ttyHSL0`): `SERIAL_TISSOT_UART`, offset register UARTDM, blok driver di `pe_serial.c` |
 | `patches-8020/0003-tissot-gicv2-interrupts.patch` | Driver **GIC-400 (GICv2)** + jalur ack/EOI MMIO. Tanpa ini `pe_init_fiq()` kosong dan kernel hang setelah beberapa baris UART |
+| `patches-8020/0004-availability-pl-host-sdk.patch` | `bsd/sys/make_symbol_aliasing.sh`: pakai `availability.pl` dari SDK **host** kalau SDK target tidak punya. SDK iPhoneOS tidak mengirim `usr/local/libexec/` sama sekali, jadi build mati di `_symbol_aliasing.h` |
 
-## Kenapa tiga patch itu perlu
+## Kenapa empat patch itu perlu
 
 **0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
 ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
@@ -38,6 +39,21 @@ kosong total, dan `sleh_irq()` memakai system register GICv3
 (`ICC_IAR0_EL1`/`ICC_EOIR0_EL1`) yang tidak ada di GICv2. Akibatnya kernel
 akan keluar beberapa baris lalu hang selamanya tanpa pernah menerima
 interrupt timer.
+
+**0004 — SDK target bukan SDK host.** Ini bukan soal tissot; build XNU
+apa pun untuk **iPhoneOS** kena. `bsd/sys/make_symbol_aliasing.sh` menyusun
+`${SDKROOT}/usr/local/libexec/availability.pl`, dan SDK iPhoneOS tidak
+punya `usr/local/libexec` sama sekali:
+
+```
+$ ls "$(xcrun -sdk iphoneos -show-sdk-path)/usr/local/libexec"
+ls: No such file or directory
+```
+
+Gejalanya menyesatkan — yang muncul cuma `make[5]: *** [_symbol_aliasing.h]
+Error 1` lalu `Error 2` dua tingkat di atasnya. Patch ini memakai salinan
+dari SDK macOS (skrip perl yang sama, mendukung `--ios` maupun `--macosx`),
+dan tetap mengeluarkan error asli kalau dua-duanya tidak ada.
 
 ## Cara pakai
 

@@ -172,7 +172,7 @@ Tiga job berjalan berurutan:
 
 | Job | Runner | Waktu | Isi |
 |-----|--------|-------|-----|
-| `patches` | ubuntu | ~2 mnt | apply 0001–0003 + cek 9 penanda + cek `arm64` (bukan `arm64e`) + `-mcpu=cortex-a53` + uji pipeline image |
+| `patches` | ubuntu | ~2 mnt | apply 0001–0004 + cek 10 penanda + cek `arm64` (bukan `arm64e`) + `-mcpu=cortex-a53` + uji pipeline image |
 | `kernel` | macOS | ~20–40 mnt | `make ... ARM64 TISSOT` sungguhan |
 | `package` | ubuntu | ~1 mnt | rakit `tissot-boot.img` dari kernel hasil job 2 |
 
@@ -234,7 +234,7 @@ Catatan umum:
 - Error "unknown argument: -Wno-..." → itu warning clang baru; jalankan
   `./xnu-build-arm64.sh --no-werror` untuk melihat error sesungguhnya.
 
-Patch 0001–0003 sudah ada. Kalau build gagal di file tertentu, **file itu
+Patch 0001–0004 sudah ada. Kalau build gagal di file tertentu, **file itu
 adalah petunjuk patch berikutnya** — bukan tanda fondasinya salah.
 
 ---

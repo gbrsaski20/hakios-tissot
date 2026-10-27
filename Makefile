@@ -8,7 +8,7 @@
 #   make tissot         Rakit prebuilt/tissot-boot.img (Python saja, tanpa compiler)
 #   make adt            Rakit prebuilt/tissot.adt dari ADT iPhone X + override MSM8953
 #   make check          Audit ADT terhadap semua syarat XNU
-#   make xnu8020        Unduh source XNU 8020 + terapkan patch 0001..0003
+#   make xnu8020        Unduh source XNU 8020 + terapkan patch 0001..0004
 #   make xnu8020-check  Cek toolchain build kernel (butuh macOS)
 #   make clean          Hapus artefak build
 #   make distclean      Hapus termasuk source yang diunduh
@@ -50,7 +50,7 @@ help:
 	@echo "  make tissot         Rakit prebuilt/tissot-boot.img"
 	@echo ""
 	@echo "Kernel XNU (butuh macOS / GitHub Actions):"
-	@echo "  make xnu8020        Unduh source + terapkan patch 0001..0003"
+	@echo "  make xnu8020        Unduh source + terapkan patch 0001..0004"
 	@echo "  make xnu8020-check  Cek toolchain (akan gagal di Windows/Linux)"
 	@echo ""
 	@echo "Bersih-bersih:"

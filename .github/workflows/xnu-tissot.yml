@@ -16,7 +16,7 @@ name: xnu-tissot
 #   Kamu tidak perlu punya Mac: repo publik dapat menit macOS gratis.
 #
 # Tiga job:
-#   patches  (ubuntu-latest)  — verifikasi patch 0001..0003 apply bersih ke
+#   patches  (ubuntu-latest)  — verifikasi patch 0001..0004 apply bersih ke
 #                               source XNU pristine. Cepat, tanpa macOS.
 #                               Ini yang menangkap patch rusak lebih dulu.
 #   kernel   (macos-latest)   — build kernel ARM64 sungguhan (mach.* TISSOT).
@@ -67,7 +67,7 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — verifikasi patch series (Linux, tanpa macOS)
   #
-  # Mengunduh xnu-8020.140.41, menerapkan 0001..0003 berurutan, lalu memastikan
+  # Mengunduh xnu-8020.140.41, menerapkan 0001..0004 berurutan, lalu memastikan
   # setiap penanda patch benar-benar ada. Kalau ada yang gagal di sini, build
   # kernel di job 2 pasti juga gagal — jadi ini gerbang cepat.
   # --------------------------------------------------------------------------
@@ -115,6 +115,8 @@ jobs:
           check pexpert/arm/pe_fiq.c                 tissot_gic_init_distributor
           check pexpert/arm/pe_fiq.c                 pe_gic_ack_irq
           check osfmk/arm64/sleh.c                   pe_gic_ack_irq
+          echo "--- patch 0004: availability.pl dari SDK host ---"
+          check bsd/sys/make_symbol_aliasing.sh      HAKIOS_HOST_SDK
           echo ""
           echo "Semua penanda patch ada."
 

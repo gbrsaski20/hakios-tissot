@@ -56,6 +56,7 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 | Source `xnu-8020.140.41` + board config `TISSOT` (patch 0001) | ✅ apply teruji |
 | Driver UART console `ttyHSL0` (patch 0002) | ✅ apply teruji, compile TBD |
 | Driver **GICv2 GIC-400** + ack/EOI MMIO (patch 0003) | ✅ apply teruji, compile TBD |
+| `availability.pl` dari SDK host (patch 0004) | ✅ apply teruji, lolos tahap `do_build_setup` |
 | Apple Device Tree (`mkadt.py`) | ✅ round-trip byte-identik, audit 12/12 |
 | Boot image Android (v0, `Image.gz-dtb` + ADT ter-embed) | ✅ valid & self-verifying |
 | Build kernel di CI (macOS runner) | ⏳ workflow siap (3 job), belum pernah jalan |
@@ -73,7 +74,7 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 | `tools/make_tissot_bootimg.py` | Packer Android `boot.img` (kernel + ramdisk + DTB + ADT) |
 | `tools/build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (uji pipeline) |
 | `devices/tissot/` | Profil device + `build-bootimage.sh` |
-| `xnu/patches-8020/` | Patch series 0001–0003 untuk XNU 8020 |
+| `xnu/patches-8020/` | Patch series 0001–0004 untuk XNU 8020 |
 | `xnu/apply-8020.sh` | Unduh source + apply patch + sanity check |
 | `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`, `--no-werror`) |
 | `.github/workflows/xnu-tissot.yml` | CI: verifikasi patch → build kernel → rakit boot image |
@@ -88,7 +89,7 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 ```
 GitHub Actions                                        PC kamu (Windows)
 ──────────────────────────────────────────            ─────────────────
-job patches   (ubuntu)  patch 0001..0003 + audit      xnu8020-prep.bat
+job patches   (ubuntu)  patch 0001..0004 + audit      xnu8020-prep.bat
 job kernel    (macos)   make ... ARM64 TISSOT         make-tissot.bat
 job package   (ubuntu)  rakit boot image                        ↓
         ↓                                                     ↓

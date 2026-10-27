@@ -1,0 +1,55 @@
+From: HakiOS <hakios@localhost>
+Subject: [PATCH 0004/4] bsd/sys: fall back to the host SDK's availability.pl
+
+The iPhoneOS SDK does not ship usr/local/libexec at all:
+
+    $ ls $(xcrun -sdk iphoneos -show-sdk-path)/usr/local/libexec
+    No such file or directory
+
+bsd/sys/make_symbol_aliasing.sh builds its input path as
+
+    AVAILABILITY_PL="${SDKROOT}/${DRIVERKITROOT}/usr/local/libexec/availability.pl"
+
+so any kernel build with SDKROOT pointing at the iPhoneOS SDK dies at
+do_build_setup with:
+
+    Unable to locate .../iPhoneOS26.5.sdk//usr/local/libexec/availability.pl
+    make[5]: *** [_symbol_aliasing.h] Error 1
+
+which surfaces three make levels up as "Error 2" in bsd/sys and tells you
+nothing about the real cause. It has nothing to do with the target SoC —
+a stock XNU build for iPhoneOS hits it too.
+
+availability.pl is the same perl script in every SDK and answers both
+--ios and --macosx, so use the host (macOS) SDK copy when the target SDK
+has none. If neither exists the original error is kept, so nothing is
+hidden.
+
+---
+--- a/bsd/sys/make_symbol_aliasing.sh
++++ b/bsd/sys/make_symbol_aliasing.sh
+@@ -37,8 +37,22 @@
+ AVAILABILITY_PL="${SDKROOT}/${DRIVERKITROOT}/usr/local/libexec/availability.pl"
+ 
+ if [ ! -x "${AVAILABILITY_PL}" ] ; then
+-    echo "Unable to locate ${AVAILABILITY_PL} (or not executable)" >&2
+-    exit 1
++    #
++    # HakiOS: the iPhoneOS SDK does not ship usr/local/libexec at all, so an
++    # XNU kernel build against SDKROOT=<iPhoneOS.sdk> always dies here with
++    # "Unable to locate ... availability.pl". The script is identical in every
++    # SDK and answers both --ios and --macosx, so fall back to the host
++    # (macOS) SDK copy when the target SDK has none.
++    #
++    HAKIOS_HOST_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
++    if [ -n "${HAKIOS_HOST_SDK}" ] && \
++       [ -x "${HAKIOS_HOST_SDK}/usr/local/libexec/availability.pl" ] ; then
++        AVAILABILITY_PL="${HAKIOS_HOST_SDK}/usr/local/libexec/availability.pl"
++        echo "note: ${SDKROOT} has no availability.pl; using host SDK copy" >&2
++    else
++        echo "Unable to locate ${AVAILABILITY_PL} (or not executable)" >&2
++        exit 1
++    fi
+ fi
+ 	    
+ {
