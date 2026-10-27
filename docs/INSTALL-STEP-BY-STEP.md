@@ -130,6 +130,25 @@ Harus keluar satu baris berisi `-mcpu=cortex-a53`.
 
 ---
 
+## B3. Verifikasi lokal di WSL (opsional, cepat)
+
+Kalau punya WSL/Ubuntu, semua yang bisa dicek tanpa compiler bisa dijalankan
+lokal — jauh lebih cepat daripada menunggu runner macOS:
+
+```bash
+cd /mnt/e/workbuddyainew/2026-10-26-09-55-05
+bash tools/wsl-check.sh
+```
+
+Skrip itu memeriksa patch 0001–0006, 14 penanda, pemetaan `arm64` (bukan
+`arm64e`), `-mcpu=cortex-a53`, lalu merakit ADT + DTB + boot image.
+Ringkasannya berbentuk `OK: 26  FAIL: 0  SKIP: 1`.
+
+Yang **tidak** bisa: mengompilasi kernel. XNU butuh clang + cctools + SDK
+Apple di macOS — itu Bagian C.
+
+---
+
 # Bagian C — Build kernel lewat GitHub Actions ✅🔒
 
 > Kenapa tidak di PC? XNU butuh clang + **cctools** (ld, ctf_insert,

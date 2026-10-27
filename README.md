@@ -72,6 +72,7 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 | `tools/extract_adt.py` | Ambil `DeviceTree.d22ap.im4p` dari IPSW + decompress |
 | `tools/build_tissot_dtb.py` | FDT Linux MSM8953 (referensi alamat register) |
 | `tools/make_tissot_bootimg.py` | Packer Android `boot.img` (kernel + ramdisk + DTB + ADT) |
+| `tools/wsl-check.sh` | Reproduksi job `patches` CI secara lokal di WSL/Linux (patch + penanda + image) |
 | `tools/build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (uji pipeline) |
 | `devices/tissot/` | Profil device + `build-bootimage.sh` |
 | `xnu/patches-8020/` | Patch series 0001–0006 untuk XNU 8020 |

@@ -69,6 +69,21 @@ Dua hal yang mudah salah dan sudah ditangani:
 Audit di akhir keluaran (`XNU 8020 requirement audit`) mencetak 12 cek; script
 keluar dengan kode 1 kalau ada yang gagal.
 
+## wsl-check.sh
+
+```bash
+bash tools/wsl-check.sh              # unduh source + apply patch + semua cek
+bash tools/wsl-check.sh --no-fetch   # kalau xnu-src-8020 sudah ada
+```
+
+Mereproduksi job `patches` dari CI di WSL/Linux, supaya iterasi patch tidak
+perlu menunggu runner macOS. Memeriksa: tool yang dibutuhkan, CRLF pada
+skrip, patch 0001..0006 apply bersih, 14 penanda patch, TISSOT -> `arm64`
+(bukan `arm64e`), `-mcpu=cortex-a53`, lalu rakit ADT + DTB + boot image.
+
+Dia **tidak** mengompilasi kernel dan tidak berpura-pura bisa: XNU butuh
+clang + cctools + SDK Apple di macOS. Bagian 6 skrip ini menjelaskan itu.
+
 ## make_tissot_bootimg.py
 
 ```bash
