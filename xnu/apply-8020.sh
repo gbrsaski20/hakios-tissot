@@ -137,6 +137,8 @@ need_grep "bsd/sys/make_symbol_aliasing.sh" "HAKIOS_STATIC_LIST"
 need_grep "makedefs/MakeInc.def" "Wno-missing-include-dirs"
 need_grep "makedefs/MakeInc.def" "Not every SDK ships usr/local/include/kernel"
 need_absent "makedefs/MakeInc.def" "enable-trivial-auto-var-init-zero"
+# patch 0006 (warning clang baru)
+need_grep "makedefs/MakeInc.def" "Wno-reserved-identifier"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

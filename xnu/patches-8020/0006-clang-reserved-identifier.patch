@@ -1,0 +1,32 @@
+From: HakiOS <hakios@localhost>
+Subject: [PATCH 0006/6] makedefs: disable -Wreserved-identifier
+
+This is the first warning that actually stops the compile. With
+-Weverything + -Werror, clang promotes
+
+    BUILD/obj/EXPORT_HDRS/bsd/arm/_types.h:15:33: error:
+      identifier '__int8_t' is reserved because it starts with '__'
+      [-Werror,-Wreserved-identifier]
+
+and every typedef in that header becomes an error: one object file
+reported "156 errors generated", all of them this same diagnostic.
+
+-Wreserved-identifier did not exist when XNU 8020 was written (2021).
+The kernel's own headers legitimately use __-prefixed names, so the
+warning can never be satisfied here. Disabled in the block that already
+exists for exactly this purpose ("When a new clang has new warnings
+disable them here until the kernel is fixed").
+
+---
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -180,7 +180,8 @@
+ 	-Wno-error=enum-enum-conversion \
+ 	-Wno-error=c99-designator \
+ 	-Wno-error=reorder-init-list \
+-	-Wno-missing-include-dirs
++	-Wno-missing-include-dirs \
++	-Wno-reserved-identifier
+ 
+ # Hand-written sign conversion diagnostics are resolved, but the
+ # auto-generated ones need mig and iig to be updated to fix.  Disable the
