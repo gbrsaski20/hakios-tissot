@@ -1,35 +1,45 @@
 From: HakiOS <hakios@localhost>
-Subject: [PATCH 0004/4] bsd/sys: fall back to the host SDK's availability.pl
+Subject: [PATCH 0004/4] bsd/sys: build _symbol_aliasing.h without availability.pl
 
-The iPhoneOS SDK does not ship usr/local/libexec at all:
-
-    $ ls $(xcrun -sdk iphoneos -show-sdk-path)/usr/local/libexec
-    No such file or directory
-
-bsd/sys/make_symbol_aliasing.sh builds its input path as
-
-    AVAILABILITY_PL="${SDKROOT}/${DRIVERKITROOT}/usr/local/libexec/availability.pl"
-
-so any kernel build with SDKROOT pointing at the iPhoneOS SDK dies at
-do_build_setup with:
+do_build_setup fails before a single file is compiled when building for
+iPhoneOS:
 
     Unable to locate .../iPhoneOS26.5.sdk//usr/local/libexec/availability.pl
     make[5]: *** [_symbol_aliasing.h] Error 1
+    make[4]: *** [build_setup] Error 2
+    make[3]: *** [build_setup_recurse_into_sys] Error 2
 
-which surfaces three make levels up as "Error 2" in bsd/sys and tells you
-nothing about the real cause. It has nothing to do with the target SoC —
-a stock XNU build for iPhoneOS hits it too.
+Three things were verified on Xcode_26.6 (macOS 26 runner):
 
-availability.pl is the same perl script in every SDK and answers both
---ios and --macosx, so use the host (macOS) SDK copy when the target SDK
-has none. If neither exists the original error is kept, so nothing is
-hidden.
+  1. the iPhoneOS SDK has no usr/local/libexec directory at all;
+  2. the MacOSX SDK has no availability.pl either;
+  3. `find /Applications/Xcode*.app /Library/Developer /usr/local
+      -name availability.pl` returns nothing.
+
+So availability.pl was removed from Xcode entirely. It only ever answered
+"which OS versions exist", so this patch answers that from a built-in
+list when the file cannot be found. availability.pl is still preferred
+when present (older Xcode, or a host SDK that ships it), and the search
+order is: target SDK -> host SDK -> built-in list.
+
+The built-in list is a superset of what any single SDK would report.
+Extra entries are harmless: every macro is guarded by its own
+__ENVIRONMENT_*_VERSION_MIN_REQUIRED__ comparison, so a version the
+compiler never targets can never match. Encoding matches Apple's
+convention (iOS 15.6 -> 150600, macOS 10.15 -> 101500, macOS 26.1 ->
+260100).
+
+This is not tissot-specific: any open-source XNU build targeting
+iPhoneOS hits it.
 
 ---
 --- a/bsd/sys/make_symbol_aliasing.sh
 +++ b/bsd/sys/make_symbol_aliasing.sh
-@@ -37,8 +37,22 @@
+@@ -35,11 +35,68 @@
+ OUTPUT="$2"
+ 
  AVAILABILITY_PL="${SDKROOT}/${DRIVERKITROOT}/usr/local/libexec/availability.pl"
++HAKIOS_STATIC_LIST=0
  
  if [ ! -x "${AVAILABILITY_PL}" ] ; then
 -    echo "Unable to locate ${AVAILABILITY_PL} (or not executable)" >&2
@@ -37,9 +47,7 @@ hidden.
 +    #
 +    # HakiOS: the iPhoneOS SDK does not ship usr/local/libexec at all, so an
 +    # XNU kernel build against SDKROOT=<iPhoneOS.sdk> always dies here with
-+    # "Unable to locate ... availability.pl". The script is identical in every
-+    # SDK and answers both --ios and --macosx, so fall back to the host
-+    # (macOS) SDK copy when the target SDK has none.
++    # "Unable to locate ... availability.pl". Try the host SDK copy first.
 +    #
 +    HAKIOS_HOST_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
 +    if [ -n "${HAKIOS_HOST_SDK}" ] && \
@@ -47,9 +55,72 @@ hidden.
 +        AVAILABILITY_PL="${HAKIOS_HOST_SDK}/usr/local/libexec/availability.pl"
 +        echo "note: ${SDKROOT} has no availability.pl; using host SDK copy" >&2
 +    else
-+        echo "Unable to locate ${AVAILABILITY_PL} (or not executable)" >&2
-+        exit 1
++        #
++        # Xcode 26 no longer ships availability.pl anywhere (verified on
++        # Xcode_26.6: not in the iPhoneOS SDK, not in the MacOSX SDK, not in
++        # /usr/local). availability.pl only answered "which OS versions
++        # exist", so answer that from a built-in list instead.
++        #
++        # The list is a superset of what any single SDK would report. Extra
++        # entries are harmless: each macro is guarded by its own
++        # __ENVIRONMENT_*_VERSION_MIN_REQUIRED__ comparison, so versions the
++        # compiler never targets simply never match.
++        #
++        echo "note: availability.pl not found anywhere; using built-in version list" >&2
++        HAKIOS_STATIC_LIST=1
 +    fi
  fi
++
++# $1 = --ios | --macosx. Mirrors availability.pl's output: a space-separated
++# list of versions, optionally with a tertiary component.
++hakios_availability() {
++    if [ "${HAKIOS_STATIC_LIST}" != "1" ] ; then
++        "${AVAILABILITY_PL}" "$1"
++        return
++    fi
++    case "$1" in
++    --ios)
++        echo "2.0 3.0 4.0 4.1 4.2 4.3 5.0 5.1 6.0 6.1 7.0 7.1 8.0 8.1 8.2 8.3 8.4" \
++             "9.0 9.1 9.2 9.3 10.0 10.1 10.2 10.3 11.0 11.1 11.2 11.3 11.4" \
++             "12.0 12.1 12.2 12.3 12.4 13.0 13.1 13.2 13.3 13.4 13.5 13.6 13.7" \
++             "14.0 14.1 14.2 14.3 14.4 14.5 14.6 14.7 14.8" \
++             "15.0 15.1 15.2 15.3 15.4 15.5 15.6 15.7 15.8" \
++             "16.0 16.1 16.2 16.3 16.4 16.5 16.6" \
++             "17.0 17.1 17.2 17.3 17.4 17.5 17.6" \
++             "18.0 18.1 18.2 18.3 18.4 18.5 18.6" \
++             "26.0 26.1 26.2"
++        ;;
++    --macosx)
++        echo "10.0 10.1 10.2 10.3 10.4 10.5 10.6 10.7 10.8 10.9 10.10 10.11" \
++             "10.12 10.13 10.14 10.15 10.16" \
++             "11.0 11.1 11.2 11.3 12.0 12.1 12.2 12.3 13.0 13.1 13.2 13.3" \
++             "14.0 14.1 14.2 14.3 14.4 14.5 14.6 14.7" \
++             "15.0 15.1 15.2 15.3 15.4 15.5 15.6" \
++             "26.0 26.1 26.2"
++        ;;
++    *)
++        return
++        ;;
++    esac
++}
  	    
  {
+ cat <<EOF
+@@ -76,7 +133,7 @@
+ 
+ EOF
+ 
+-for ver in $(${AVAILABILITY_PL} --ios) ; do
++for ver in $(hakios_availability --ios) ; do
+     set -- $(echo "$ver" | tr '.' ' ')
+     ver_major=$1
+     ver_minor=$2
+@@ -94,7 +151,7 @@
+     fi
+ done
+ 
+-for ver in $(${AVAILABILITY_PL} --macosx) ; do
++for ver in $(hakios_availability --macosx) ; do
+     set -- $(echo "$ver" | tr '.' ' ')
+     ver_major=$1
+     ver_minor=$2

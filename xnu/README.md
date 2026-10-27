@@ -18,7 +18,7 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0001-add-tissot-board-config.patch` | Board config `TISSOT`: masuk `SUPPORTED_ARM64_MACHINE_CONFIGS`, `-mcpu=cortex-a53`, **`arm64` bukan `arm64e`** (Cortex-A53 tidak punya PAC), `TISSOT.h`, blok `board_config.h` |
 | `patches-8020/0002-tissot-uart-console.patch` | Driver console BLSP1 UART1 @ `0x078AF000` (`ttyHSL0`): `SERIAL_TISSOT_UART`, offset register UARTDM, blok driver di `pe_serial.c` |
 | `patches-8020/0003-tissot-gicv2-interrupts.patch` | Driver **GIC-400 (GICv2)** + jalur ack/EOI MMIO. Tanpa ini `pe_init_fiq()` kosong dan kernel hang setelah beberapa baris UART |
-| `patches-8020/0004-availability-pl-host-sdk.patch` | `bsd/sys/make_symbol_aliasing.sh`: pakai `availability.pl` dari SDK **host** kalau SDK target tidak punya. SDK iPhoneOS tidak mengirim `usr/local/libexec/` sama sekali, jadi build mati di `_symbol_aliasing.h` |
+| `patches-8020/0004-availability-pl-host-sdk.patch` | `bsd/sys/make_symbol_aliasing.sh`: `availability.pl` sudah **tidak ada di Xcode 26** (tidak di SDK iPhoneOS, tidak di SDK macOS, tidak di `/usr/local`). Patch ini mencari target SDK -> host SDK -> daftar versi bawaan, supaya build tidak mati di `_symbol_aliasing.h` |
 
 ## Kenapa empat patch itu perlu
 

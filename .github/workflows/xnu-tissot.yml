@@ -117,6 +117,7 @@ jobs:
           check osfmk/arm64/sleh.c                   pe_gic_ack_irq
           echo "--- patch 0004: availability.pl dari SDK host ---"
           check bsd/sys/make_symbol_aliasing.sh      HAKIOS_HOST_SDK
+          check bsd/sys/make_symbol_aliasing.sh      HAKIOS_STATIC_LIST
           echo ""
           echo "Semua penanda patch ada."
 
