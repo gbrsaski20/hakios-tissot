@@ -37,7 +37,7 @@ ADT_TEMPLATE ?= $(DEVICE)/dt/d22ap_15.6.1.adt
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tissot adt check xnu8020 xnu8020-check kernel-clean \
+.PHONY: help tissot adt check wsl xnu8020 xnu8020-check kernel-clean \
         clean distclean
 
 # ============================================================================
@@ -49,8 +49,10 @@ help:
 	@echo "  make check          Audit ADT terhadap syarat XNU (12 cek)"
 	@echo "  make tissot         Rakit prebuilt/tissot-boot.img"
 	@echo ""
-	@echo "Kernel XNU (butuh macOS / GitHub Actions):"
-	@echo "  make xnu8020        Unduh source + terapkan patch 0001..0006"
+	@echo "Kernel XNU:"
+	@echo "  make wsl            Seluruh pipeline dari WSL/Linux (patch + image +"
+	@echo "                      kompilasi kalau toolchain Mach-O tersedia)"
+	@echo "  make xnu8020        Unduh source + terapkan patch 0001..0008"
 	@echo "  make xnu8020-check  Cek toolchain (akan gagal di Windows/Linux)"
 	@echo ""
 	@echo "Bersih-bersih:"
@@ -60,8 +62,16 @@ help:
 	@echo "Variabel:"
 	@echo "  PYTHON=$(PYTHON)   JOBS=$(JOBS)   KERNEL_CONFIG=$(KERNEL_CONFIG)"
 	@echo ""
-	@echo "Alur lengkap: make adt -> (build kernel di CI) -> make tissot"
+	@echo "Alur lengkap: make wsl -> (kompilasi kernel di macOS) -> make tissot"
 	@echo "             -> fastboot boot prebuilt/tissot-boot.img"
+
+# ============================================================================
+# Satu perintah untuk seluruh pipeline lokal (WSL / Linux / macOS).
+# Berhenti dengan kode 3 kalau semua sudah beres kecuali kompilasi, karena
+# toolchain Mach-O tidak ada. Lihat tools/wsl-build.sh.
+# ============================================================================
+wsl:
+	@bash $(TOOLS)/wsl-build.sh
 
 # ============================================================================
 # ADT — Apple Device Tree untuk MSM8953

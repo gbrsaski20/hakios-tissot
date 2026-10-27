@@ -46,15 +46,12 @@ on:
         required: true
         default: true
         type: boolean
-  push:
-    paths:
-      - "xnu/patches-8020/**"
-      - "xnu/apply-8020.sh"
-      - "xnu-build-arm64.sh"
-      - "tools/**"
-      - "Makefile"
-      - ".github/workflows/xnu-tissot.yml"
-
+  # Sengaja TIDAK ada trigger `push`.
+  #
+  # Build kernel sekarang dijalankan lokal lewat `bash tools/wsl-build.sh`
+  # (atau di macOS lewat `./xnu-build-arm64.sh`). Workflow ini disisakan
+  # hanya untuk dijalankan manual dari tab Actions kalau suatu saat butuh
+  # runner macOS lagi. Tanpa blok `push`, commit tidak memicu build apa pun.
 # Satu build pada satu waktu per ref; push baru membatalkan yang lama.
 concurrency:
   group: xnu-tissot-${{ github.ref }}

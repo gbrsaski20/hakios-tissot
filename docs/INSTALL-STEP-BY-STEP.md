@@ -137,24 +137,36 @@ lokal — jauh lebih cepat daripada menunggu runner macOS:
 
 ```bash
 cd /mnt/e/workbuddyainew/2026-10-26-09-55-05
-bash tools/wsl-check.sh
+bash tools/wsl-build.sh            # seluruh pipeline lokal
+bash tools/wsl-check.sh            # hanya pemeriksaan, tanpa mengubah apa pun
 ```
 
-Skrip itu memeriksa patch 0001–0008, 17 penanda, pemetaan `arm64` (bukan
-`arm64e`), `-mcpu=cortex-a53`, lalu merakit ADT + DTB + boot image.
-Ringkasannya berbentuk `OK: 26  FAIL: 0  SKIP: 1`.
+`wsl-build.sh` menjalankan semuanya berurutan: cek lingkungan dan toolchain,
+apply patch 0001–0008, cek penanda, cek ABI `arm64` (bukan `arm64e`) dan
+`-mcpu=cortex-a53`, rakit ADT + DTB, lalu kompilasi kalau toolchain-nya ada.
 
-Yang **tidak** bisa: mengompilasi kernel. XNU butuh clang + cctools + SDK
-Apple di macOS — itu Bagian C.
+Kode keluarnya membedakan dua hal: `1` berarti ada langkah yang benar-benar
+gagal, sedangkan `3` berarti patch dan image sudah beres dan yang tersisa
+hanya kompilasi — karena toolchain Mach-O belum ada.
+
+Yang **tidak** bisa: mengompilasi kernel. XNU menghasilkan Mach-O, dan build
+system-nya memanggil `xcrun`, `ld64`, `ctf_insert`, `kextsymboltool`, plus
+header SDK iPhoneOS. Semua itu biner macOS dari Xcode/cctools. Tidak ada
+paket Linux yang menggantikannya secara utuh — `ld64` bisa dari cctools-port,
+tapi `ctf_insert` dan SDK-nya tetap dari Apple.
 
 ---
 
-# Bagian C — Build kernel lewat GitHub Actions ✅🔒
+# Bagian C — Build kernel di macOS ⚠️ (wajib untuk kompilasi)
 
-> Kenapa tidak di PC? XNU butuh clang + **cctools** (ld, ctf_insert,
-> kextsymboltool) + SDK Apple, dan build system-nya berasumsi macOS.
-> GitHub menyediakan runner macOS gratis untuk repo publik.
+> Kenapa tidak di PC? XNU menghasilkan **Mach-O**, dan build system-nya
+> memanggil `xcrun`, `ld64`, `ctf_insert`, `kextsymboltool`, serta header SDK
+> iPhoneOS. Semua itu biner macOS dari Xcode/cctools.
 > Ini soal **mesin build**, bukan target — targetnya tetap Mi A1.
+>
+> Workflow GitHub sekarang **tidak lagi jalan otomatis** (tidak ada trigger
+> `push`). Kalau tetap ingin memakainya, jalankan manual dari tab Actions:
+> Actions → xnu-tissot → Run workflow.
 
 ## C1. Buat repo & push
 

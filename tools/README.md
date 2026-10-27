@@ -84,6 +84,32 @@ skrip, patch 0001..0008 apply bersih, 17 penanda patch, TISSOT -> `arm64`
 Dia **tidak** mengompilasi kernel dan tidak berpura-pura bisa: XNU butuh
 clang + cctools + SDK Apple di macOS. Bagian 6 skrip ini menjelaskan itu.
 
+## wsl-build.sh
+
+```bash
+bash tools/wsl-build.sh                  # seluruh pipeline lokal
+bash tools/wsl-build.sh --check          # laporan toolchain saja
+bash tools/wsl-build.sh --no-compile     # patch + image, tanpa kompilasi
+bash tools/wsl-build.sh --sdk /path/iPhoneOS.sdk
+```
+
+Satu perintah untuk semua yang bisa dikerjakan di WSL: cek lingkungan,
+`apply-8020.sh`, cek ABI (`arm64`, bukan `arm64e`), `mkadt.py`,
+`build_tissot_dtb.py`, kompilasi (kalau toolchain ada), lalu boot image.
+
+Kode keluar membedakan dua hal yang penting:
+
+| kode | arti |
+|------|------|
+| `0` | semua langkah berhasil, termasuk kompilasi |
+| `1` | ada langkah yang gagal — biasanya patch atau image |
+| `3` | pipeline lokal beres, **kompilasi** yang belum bisa: toolchain Mach-O tidak ada |
+
+Kalau toolchain lengkap (macOS, atau Linux dengan `ld64` + `ctf_insert` +
+`kextsymboltool` + SDK iPhoneOS), skrip memasang shim `xcrun` sementara lalu
+memanggil `xnu-build-arm64.sh`, sehingga makefile XNU bisa jalan di luar
+macOS.
+
 ## make_tissot_bootimg.py
 
 ```bash
