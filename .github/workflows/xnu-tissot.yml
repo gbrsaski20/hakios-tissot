@@ -217,6 +217,16 @@ jobs:
           ld -v 2>&1 | head -3 || true
           echo "--- SDK iPhoneOS ---"
           xcrun -sdk iphoneos -show-sdk-version 2>/dev/null || true
+          SDK_PATH="$(xcrun -sdk iphoneos -show-sdk-path 2>/dev/null || true)"
+          echo "sdk path : $SDK_PATH"
+          echo "platform : $(xcrun -sdk iphoneos -show-sdk-platform-path 2>/dev/null || true)"
+          # bsd/sys/make_symbol_aliasing.sh memakai ini; kalau tidak ada,
+          # build mati di _symbol_aliasing.h dengan error yang membingungkan.
+          if [ -x "$SDK_PATH/usr/local/libexec/availability.pl" ]; then
+            echo "availability.pl : ok"
+          else
+            echo "availability.pl : MISSING (bsd/sys akan gagal)"
+          fi
 
       - name: Siapkan source + patch
         run: |

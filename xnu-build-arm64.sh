@@ -112,6 +112,17 @@ if command -v xcrun >/dev/null 2>&1; then
     sdk_path="$(xcrun -sdk "$sdk_name" -show-sdk-path 2>/dev/null || true)"
     if [ -n "$sdk_path" ]; then
         note "SDKROOT: $sdk_name -> $sdk_path"
+        # bsd/sys/make_symbol_aliasing.sh does
+        #   AVAILABILITY_PL="${SDKROOT}/usr/local/libexec/availability.pl"
+        # so SDKROOT must be a real path. Passing the *name* makes that a
+        # relative path and the build dies on _symbol_aliasing.h.
+        if [ ! -x "$sdk_path/usr/local/libexec/availability.pl" ]; then
+            note "availability.pl: MISSING under $sdk_path"
+            note "                 (bsd/sys/_symbol_aliasing.h akan gagal)"
+            missing=1
+        else
+            note "availability.pl: ok"
+        fi
     else
         note "SDKROOT: '$sdk_name' not resolvable (need the iOS SDK)"
         missing=1
@@ -132,12 +143,19 @@ echo ""
 # ---------------------------------------------------------------------------
 # 2. build command
 #
-# PLATFORM is derived by makedefs/MakeInc.cmd from
+# SDKROOT is passed as an ABSOLUTE PATH, and PLATFORM is passed explicitly.
+#
+# Why: makedefs/MakeInc.cmd derives PLATFORM from
 #   xcrun -sdk $(SDKROOT) -show-sdk-platform-path
-# so passing SDKROOT=iphoneos yields PLATFORM=iPhoneOS automatically.
-# Do NOT pass PLATFORM explicitly (it must be undefined for that derivation).
+# which silently falls back to "MacOSX" when it cannot resolve anything —
+# that would build a macOS kernel without any error. Deriving both here and
+# passing them explicitly removes the ambiguity, and gives the helper scripts
+# in bsd/sys the absolute SDK path they expect.
 # ---------------------------------------------------------------------------
 SDK_NAME="${SDKROOT:-iphoneos}"
+SDK_PATH="$(xcrun -sdk "$SDK_NAME" -show-sdk-path 2>/dev/null || true)"
+PLATFORM_NAME="$(xcrun -sdk "$SDK_NAME" -show-sdk-platform-path 2>/dev/null \
+                 | sed 's,^.*/\([^/]*\)\.platform$,\1,')"
 
 # TARGET_CONFIGS is built from KERNEL_CONFIGS x ARCH_CONFIGS x MACHINE_CONFIGS.
 # MACHINE_CONFIGS defaults to "DEFAULT", which resolves to VMAPPLE for ARM64 —
@@ -148,8 +166,16 @@ MAKE_CMD=(make -C "$SRC" -j"$JOBS"
           ARCH_CONFIGS=ARM64
           KERNEL_CONFIGS="$CONFIG"
           MACHINE_CONFIGS="$MACHINE"
-          CURRENT_MACHINE_CONFIG="$MACHINE"
-          SDKROOT="$SDK_NAME")
+          CURRENT_MACHINE_CONFIG="$MACHINE")
+
+if [ -n "$SDK_PATH" ]; then
+    MAKE_CMD=("${MAKE_CMD[@]}" SDKROOT="$SDK_PATH")
+else
+    MAKE_CMD=("${MAKE_CMD[@]}" SDKROOT="$SDK_NAME")
+fi
+if [ -n "$PLATFORM_NAME" ]; then
+    MAKE_CMD=("${MAKE_CMD[@]}" PLATFORM="$PLATFORM_NAME")
+fi
 
 # XNU sets WERROR := -Werror in makedefs/MakeInc.def. A clang much newer than
 # XNU 8020 (2021) turns new warnings on by default, which -Werror then promotes
@@ -161,6 +187,10 @@ MAKE_CMD=(make -C "$SRC" -j"$JOBS"
 if [ "$NOWERROR" -eq 1 ]; then
     MAKE_CMD=("${MAKE_CMD[@]}" WERROR=)
 fi
+
+echo "  SDK    : ${SDK_PATH:-$SDK_NAME}"
+echo "  PLATFORM: ${PLATFORM_NAME:-<biarkan make yang menurunkan>}"
+echo ""
 
 case "$MODE" in
     check)
