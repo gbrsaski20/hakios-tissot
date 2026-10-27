@@ -20,8 +20,9 @@ Apple (hanya ada 3 tag: `.101.4`, `.121.3`, `.140.41`).
 | Script build + cek toolchain          | ✅ `xnu-build-arm64.sh` (+ `--force`)   |
 | Patch 0002 — driver UART console      | ✅ **draft**, apply teruji (compile TBD)|
 | **Build kernel sungguhan**            | ❌ butuh macOS + cctools + SDK          |
-| UART benar-benar keluar log           | ❌ butuh ADT (`mkadt.py`) + hardware    |
-| Platform identify / ADT               | ❌ belum                                |
+| UART benar-benar keluar log           | ❌ butuh hardware                      |
+| `mkadt.py` (Apple Device Tree)        | ✅ round-trip byte-identik, preset ok   |
+| Platform identify / ADT               | ⚠️ ADT siap, integrasi XNU belum        |
 | SHIM + mkpayload                      | ❌ belum                                |
 
 ---
@@ -93,6 +94,54 @@ Jadi seluruh lapisan platform harus ditulis sendiri.
 | Identifikasi mesin / ADT | `pexpert/arm/pe_identify_machine.c` (630 baris)       | di sini XNU membaca Apple Device Tree                   |
 | Pembaca DT               | `pexpert/gen/device_tree.c` (554 baris)               | `DTGetProperty`                                         |
 | Boot args                | `pexpert/gen/bootargs.c`                              | `PE_parse_boot_argn`                                    |
+
+---
+
+### 2.7 Format ADT — ditemukan & dibuktikan
+
+XNU **tidak** memakai FDT. Formatnya ada di `pexpert/pexpert/device_tree.h`:
+
+```c
+struct DeviceTreeNode {              // little-endian
+    uint32_t nProperties;
+    uint32_t nChildren;
+    DeviceTreeNodeProperty props[nProperties];
+    DeviceTreeNode         children[nChildren];   // rekursif
+};
+struct DeviceTreeNodeProperty {
+    char     name[32];               // NUL-padded
+    uint32_t length;                 // panjang asli = value & 0x7FFFFFFF
+    uint8_t  value[length];          // di-pad ke 4 byte
+};
+```
+
+Dua hal yang **tidak** tertulis di header dan hanya ketemu secara empiris
+(dari ADT asli d22ap iOS 15.6.1):
+
+1. Field `length` memakai **bit atas `0x80000000` sebagai flag**. 89 dari 3.363
+   properti memakainya (semuanya bertipe referensi `syscfg/...`). Flag ini
+   **harus dipertahankan per-properti**, kalau tidak, ADT hasil tulis berbeda
+   dari aslinya.
+2. Seluruh field **little-endian** (bukan big-endian seperti FDT).
+
+Bukti: `python tools/mkadt.py --roundtrip` → parse lalu tulis ulang
+**byte-identik** dengan 185.188 byte asli.
+
+### 2.8 Bagaimana `serial_init()` menemukan UART
+
+`pe_arm_get_soc_base_phys()` (`pe_identify_machine.c:181-201`):
+
+```c
+SecureDTGetProperty(entryP, "ranges", &ranges_prop, &prop_size);
+gPESoCBasePhys = *(ranges_prop + 1);   // word ke-2 (uintptr_t = 8 byte)
+```
+
+lalu `serial_init()` melakukan `ml_io_map(soc_base + *reg_prop, *(reg_prop+1))`
+dan **berhenti lebih awal kalau `soc_base == 0`**.
+
+Konsekuensinya untuk tissot: `ranges` harus punya parent **bukan nol**.
+`mkadt.py` memakai `ranges = {0, 0x07800000, 0x10000000}` dan `serial.reg =
+{0xAF000, 0x200}` → `0x07800000 + 0xAF000 = 0x78AF000` (UART console asli).
 
 ---
 
@@ -230,7 +279,7 @@ fastboot boot prebuilt/tissot-boot.img
 - [ ] Patch 0003 — platform identify (ADT)
 - [ ] Patch 0004 — ARM64_LINK_ADDR
 - [ ] CI macOS → kernel pertama
-- [ ] `mkadt.py` untuk MSM8953
+- [x] `mkadt.py` untuk MSM8953 (template + override, round-trip terbukti)
 - [ ] `shim/` untuk tissot
 - [ ] `mkiosroot.sh` dari IPSW 15.6.1
 - [ ] Boot pertama + baca log via UART

@@ -1,185 +1,144 @@
-# HakiOS-x86
+# HakiOS — Xiaomi Mi A1 (`tissot`)
 
-**Run the open-source XNU kernel on x86_64 PCs and in QEMU — like Bliss OS, but for Darwin/iOS user space instead of Android.**
+**Menjalankan XNU (kernel Darwin/iOS) secara native di Xiaomi Mi A1 — ARM64, bukan emulasi.**
 
-HakiOS-x86 is a fork/port of the [HakiOS](https://github.com/oosexgang/hackios-xnu-kernel) research project, retargeted from ARM64/Qualcomm to **x86_64**. It runs Apple's open-source XNU kernel (xnu-8796.121.2) on standard PC hardware and in the QEMU `q35` machine, with custom drivers for the x86 platform, and optionally boots the iOS 16.5 user space on top.
+Port ini membangun XNU dari source Apple (`xnu-8020`, generasi iOS 15) lalu
+mem-boot-nya di SoC Qualcomm MSM8953 milik Mi A1, dengan user space iOS 15
+sebagai root.
 
-Nothing is installed. The kernel and loader go into RAM — a reboot brings the PC back to its own OS. This is a research bench, not a daily driver.
+> ⚠️ **Repo ini punya dua jalur.** Yang **aktif** adalah **Mi A1 (ARM64)**.
+> Jalur **x86_64** di bagian bawah adalah fase pertama proyek dan **tidak
+> dipakai** untuk Mi A1 — lihat [Jalur lama](#jalur-lama-x86_64-fase-1-tidak-dipakai-untuk-mi-a1).
 
-## Why?
+---
 
-| | Bliss OS | HakiOS-x86 |
-|---|---|---|
-| Kernel | Linux (Android) | XNU (Darwin/iOS) |
-| Architecture | x86_64 | x86_64 |
-| User space | Android (AOSP) | iOS user space (optional) |
-| Host | PC / QEMU | PC / QEMU |
-| Approach | AOSP ported to x86 | XNU ported to x86, custom loader + drivers |
+## Target perangkat
 
-HakiOS-x86 is the "Bliss OS for iOS" — it takes the XNU kernel (which Apple publishes under APSL 2.0), ports it to x86_64 PC hardware, and boots it with a custom UEFI loader and custom x86 drivers. The stock iOS user space is optional and requires you to supply your own IPSW.
+| Item | Nilai |
+|------|-------|
+| Device | Xiaomi Mi A1 (Android One), codename **`tissot`** |
+| SoC | Qualcomm **MSM8953** (Snapdragon 625) |
+| CPU | 8× Cortex-A53, **ARMv8.0-A**, tanpa PAC |
+| RAM | 4 GB |
+| Bootloader | harus **unlocked** |
+| Identitas yang dipakai | iPhone X (`d22ap`) — dibutuhkan MobileGestalt |
 
-## What is in this repository
+## Kenapa iOS 15, bukan iOS 16
 
-Only my code and my data:
+Apple mengirim satu keluarga binary `arm64` per versi iOS yang harus boot di
+perangkat arm64 **tertua** yang didukung versi itu:
 
-- **`xnu/`** — the kernel: a patch to Apple's open-source XNU (`xnu/hakios-x86.patch`, APSL 2.0) and my x86 driver files (`xnu/files/`), laid over a fresh clone by `xnu/apply.sh`
-- **`xnuloader/`** — the boot loader: a UEFI application for x86_64 that loads `mach_kernel` and boots XNU
-- **`userland/`** — my programs and libraries (`src/`), the image build, launchd jobs
-- **`sysimage/`** — scripts that fetch and unpack OS files from the IPSW (none of the files themselves)
-- **`devices/pc-q35/`** — the PC device: QEMU q35 config, ACPI tables, device tree
-- **`tools/`** — APFS, run scripts, QMI tests
-- **`qemu/`** — running in QEMU
-- **`docs/`** — notes, architecture, driver docs
-- **`prebuilt/`** — the built kernel, loader and libraries
+| iOS | Perangkat arm64 tertua | Level ARM |
+|-----|------------------------|-----------|
+| **15** | iPhone 6s (A9) | **ARMv8.0** ✅ cocok dengan A53 |
+| 16 | iPhone 8 / X (A11) | ARMv8.2 — boleh pakai instruksi yang fault di A53 |
 
-Not in the repository, never:
-- Any file of iOS: no binary, image, cache, font, picture or screenshot
-- Keys, certificates, activation, or anything that would make the PC pass as an iPhone to Apple's services
-
-## Quick start in QEMU
-
-Linux x86-64, about 12 GB of disk, `qemu-system-x86_64`, `edk2-x86_64` (OVMF).
-
-```bash
-git clone https://github.com/oosexgang/hackios-xnu-kernel.git hakios-x86
-cd hakios-x86
-
-# Build the open kernel (no IPSW, no iOS user space needed)
-make x86-open
-
-# Or build the full system (needs the IPSW, see below)
-make x86-full
-
-# Run in QEMU
-make qemu-open          # open kernel + placeholder loader + tiny user space
-# or
-make qemu               # full iOS user space (needs IPSW)
-```
-
-The open path boots XNU, prints kernel messages to serial, and drops to a minimal shell. The full path boots the iOS user space.
-
-## On a real PC
-
-A PC with UEFI boot, the images from the build step, and a USB drive:
-
-```bash
-# Build the open kernel + loader
-make x86-open
-
-# Create a bootable USB
-tools/make-boot-usb.sh /dev/sdX
-
-# Boot from USB (or use the EFI shell)
-# The loader goes into RAM, the system lives in RAM for the session
-```
-
-## Building from source
-
-### Prerequisites
-
-- Linux x86-64 host (Ubuntu 22.04+ or equivalent)
-- `clang` (14+), `lld-link`, `ld`, `make`
-- `qemu-system-x86_64`
-- `7z` (7-Zip 23+), `lz4`
-- For the full system: the iOS 16.5 IPSW (from Apple's public servers)
-
-### Building the kernel (x86_64)
-
-```bash
-xnu/apply.sh             # XNU sources from Apple's GitHub + my changes -> xnu-src/
-xnu-deps/setup.sh        # dependencies and tools
-./xnu-build-x86.sh -j8   # -> xnu-src/.../BUILD/obj/DEVELOPMENT_X86_64/mach.development
-```
-
-XNU natively supports `X86_64` as a build architecture. The patch adds:
-- x86_64 device tree / ACPI platform definitions
-- Custom x86_64 drivers for QEMU q35 hardware
-- Boot arguments and platform expert for the PC
-
-### Building the loader
-
-```bash
-xnuloader/build.sh        # clang + lld-link, an EFI application (PE64)
-```
-
-The loader is a UEFI application (x86_64 PE) that:
-1. Reads `mach_kernel` from the EFI System Partition
-2. Reads the kernel command line
-3. Sets up the boot arguments (BootArgs for x86_64)
-4. Jumps to the kernel entry point
-
-### Building the user space and images
-
-```bash
-REST=1 userland/build.sh   # APFS images: userland/root.apfs and userland/system.apfs
-```
-
-## Architecture
-
-```
-+-------------------------------------------------------------------+
-|                        QEMU q35 / Real PC                          |
-|  (Intel CPU, ICH9, virtio devices, VGA, AHCI, E1000)              |
-+-------------------------------------------------------------------+
-           |                    |                    |
-+------------------+  +-------------------+  +------------------+
-| xnuloader (UEFI) |  | mach_kernel (XNU) |  | user space       |
-|  x86_64 PE64     |  |  DEVELOPMENT_     |  |  launchd,        |
-|  loads kernel,   |->|  X86_64           |->|  backboardd,     |
-|  sets BootArgs    |  |  + hakios drivers|  |  SpringBoard     |
-+------------------+  +-------------------+  +------------------+
-```
-
-### Drivers (`xnu/files/bsd/dev/hakios.*.c`)
-
-| Driver | File | Hardware |
-|--------|------|----------|
-| Display (VGA/bochs) | `hakios.display.c` | QEMU VGA, Bochs VBE |
-| Input (keyboard/mouse) | `hakios.input.c` | i8042, PS/2, USB HID |
-| Disk (AHCI/virtio) | `hakios.disk.c` | AHCI SATA, virtio-blk |
-| Network (E1000/virtio) | `hakios.net.c` | Intel E1000, virtio-net |
-| Audio (HDA) | `hakios.audio.c` | Intel HDA, AC97 |
-| Timer (HPET/Local APIC) | `hakios.timer.c` | HPET, Local APIC, RTC |
-| Serial | `hakios.serial.c` | 16550 UART |
-| PCI | `hakios.pci.c` | PCI/PCIe config space |
-
-## Kernel arguments
-
-| Argument | What it does |
-|----------|-------------|
-| `cpus=N` | Number of CPU cores to use |
-| `display=1` | VGA display driver |
-| `input=1` | Keyboard and mouse input |
-| `disk=1` | AHCI/virtio disk driver |
-| `net=1` | E1000/virtio network driver |
-| `audio=1` | HDA audio driver |
-| `serial=1` | Serial console output |
-| `var_store=1` | Keep /private/var across reboots |
+iOS 16 membuang A9, sehingga bebas memakai instruksi ARMv8.1/8.2. Karena itu
+basis port ini **iOS 15.6.1 (19G82)**. Detail: `docs/IOS15-VS-IOS16-ARMv8.md`.
 
 ## Status
 
-| Works | Not yet |
-|-------|---------|
-| XNU kernel boots on x86_64 (QEMU q35) | iOS GUI (needs full user space) |
-| Serial console, kernel messages | Metal rendering |
-| VGA text/graphics mode | Bluetooth |
-| Multi-core (SMP) | Wi-Fi (needs x86 Wi-Fi driver) |
-| AHCI disk I/O | Audio (needs HDA driver work) |
-| E1000 network | Full iOS app compatibility |
-| Custom UEFI loader | |
+| Komponen | Status |
+|----------|--------|
+| Source `xnu-8020.140.41` + board config `TISSOT` | ✅ |
+| Patch UART console (draft) | ✅ apply teruji, compile TBD |
+| Apple Device Tree (`mkadt.py`) | ✅ round-trip byte-identik |
+| Boot image Android (v0, `Image.gz-dtb`) | ✅ valid & self-verifying |
+| Build kernel di CI (macOS runner) | ⏳ sedang berjalan |
+| `mkpayload.py`, `shim/`, `mkiosroot.sh` | ❌ belum |
+| Boot ke SpringBoard | ❌ target akhir |
+
+## Berkas yang relevan untuk Mi A1
+
+| Berkas | Fungsi |
+|--------|--------|
+| `tools/mkadt.py` | Editor/generator **Apple Device Tree** (format yang dipakai XNU) |
+| `tools/extract_adt.py` | Ambil `DeviceTree.d22ap.im4p` dari IPSW + decompress |
+| `tools/build_tissot_dtb.py` | FDT Linux MSM8953 (referensi alamat register) |
+| `tools/make_tissot_bootimg.py` | Packer Android `boot.img` (kernel + ramdisk + DTB) |
+| `tools/build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (uji pipeline) |
+| `devices/tissot/` | Profil device + `build-bootimage.sh` |
+| `xnu/patches-8020/` | Patch series untuk XNU 8020 |
+| `xnu/apply-8020.sh` | Unduh source + apply patch |
+| `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`) |
+| `.github/workflows/xnu-tissot.yml` | CI build di macOS runner |
+| `xnu8020-prep.bat`, `make-tissot.bat` | Launcher Windows |
+| `docs/INSTALL-STEP-BY-STEP.md` | **Panduan lengkap A–H** |
+| `docs/XNU8020-PORT-PLAN.md` | Rencana port berbasis `file:line` |
+| `docs/GAP-VS-IOS-SWEET.md` | Perbandingan dengan panduan ios-sweet |
+
+## Alur build
+
+```
+GitHub Actions (macOS)                     PC kamu (Windows)
+─────────────────────                      ─────────────────
+xnu/apply-8020.sh  → patch XNU              xnu8020-prep.bat
+xnu-build-arm64.sh → kernel ARM64           tools/mkadt.py
+        ↓                                        ↓
+artifact: kernel.*                        tissot.adt + boot.img
+        └───────────────┬────────────────────────┘
+                        ↓
+               fastboot boot  (kamu, di HP)
+```
+
+Perintah build yang dipakai CI:
+
+```
+make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
+     CURRENT_MACHINE_CONFIG=TISSOT SDKROOT=iphoneos
+```
+
+Mulai dari `docs/INSTALL-STEP-BY-STEP.md`.
+
+---
+
+## Jalur lama: x86_64 (fase 1, tidak dipakai untuk Mi A1)
+
+Fase pertama proyek ini menargetkan **PC x86_64 / QEMU q35** — "Bliss OS tapi
+untuk XNU". Hasilnya masih ada di repo dan masih bisa dibangun, tetapi **tidak
+berhubungan dengan Mi A1** dan tidak dipakai oleh workflow `xnu-tissot`.
+
+| Berkas | Fungsi |
+|--------|--------|
+| `xnu/hakios-x86.patch`, `xnu/files/`, `xnu/apply.sh` | Patch XNU + driver x86 (VGA, PS/2, AHCI, E1000, HDA, HPET) |
+| `xnu-build-x86.sh`, `xnu-deps/` | Build kernel x86 |
+| `xnuloader/` | Boot loader UEFI x86_64 |
+| `userland/`, `sysimage/`, `qemu/`, `devices/pc-q35/` | User space, fetch IPSW, QEMU |
+| `tools/make-esp.sh`, `make-boot-usb.sh`, `make-rufus-img.sh` | Image USB x86 |
+| `tools/build_kernel_placeholder.py`, `make_rufus_img.py` | Placeholder x86 |
+| `build-windows.ps1` / `.bat`, `make-bootable.bat`, `make-rufus-img.bat`, `run-qemu-windows.bat`, `setup-wsl.bat` | Launcher x86 |
+| `README-windows.md` | Dokumentasi x86 |
+| Target Makefile `x86-open`, `x86-full`, `qemu-open`, `qemu` | Build x86 |
+
+Kenapa masih ada: bukan sampah — ia mendokumentasikan fase 1 dan masih bisa
+dijalankan. Kalau tidak diperlukan lagi, jalur ini bisa dipindah ke
+`legacy-x86/` atau dihapus.
+
+---
 
 ## Independent, and Apple-free at the core
 
-HakiOS-x86 is an independent research project. It is **not affiliated with or endorsed by Apple**. "iOS", "iPhone", "XNU" and "Apple" are named only to describe what the code works with. The core kernel, the boot loader and the open tools build and run with nothing of Apple's:
+Proyek riset independen. **Tidak berafiliasi dengan atau didukung Apple.**
+"iOS", "iPhone", "XNU", "Apple" hanya disebut untuk menjelaskan apa yang
+dikerjakan kode ini.
 
-```bash
-make qemu-open      # open kernel + placeholder loader + tiny raw-syscall user space, in QEMU
-```
+Tidak ada berkas milik Apple di repo ini, dan tidak akan pernah:
 
-No IPSW, no iOS user space, no firmware. Booting the stock iOS user space is an optional path that needs the IPSW which you supply from your own device.
+- tidak ada IPSW, image iOS, dyld cache, font, atau aset Apple
+- tidak ada key, sertifikat, atau activation
+- `xnu-src-8020/` (source Apple) diunduh saat build, **tidak** di-commit
+- ADT/DTB hasil ekstraksi dari IPSW juga di-*gitignore*
+
+IPSW yang dipakai adalah milikmu sendiri (dari Apple CDN) dan tidak
+didistribusikan ulang.
 
 ## Licenses
 
-My code is under the license of the files it changes: the XNU patch under the Apple Public Source License 2.0 (Apple publishes XNU under it; the terms are met: changes are published as source, notices are kept), the rest as the file headers say. iOS, its images, Apple's trademarks belong to their owners, are not in this repository and are not distributed.
+Kode saya mengikuti lisensi berkas yang diubah: patch XNU di bawah **Apple
+Public Source License 2.0** (Apple menerbitkan XNU dengan lisensi itu; syaratnya
+dipenuhi — perubahan dipublikasikan sebagai source dan notices dipertahankan),
+sisanya sesuai header masing-masing berkas. iOS, image-nya, dan merek dagang
+Apple milik pemiliknya, tidak ada di repo ini dan tidak didistribusikan.
 
-See `LEGAL.md`, `COMPLIANCE.md`, `THIRD_PARTY_LICENSES.md`, and `NOTICE` for details. None of this is legal advice.
+Lihat `LEGAL.md`, `COMPLIANCE.md`, `THIRD_PARTY_LICENSES.md`, dan `NOTICE`.
+Semua ini bukan nasihat hukum.

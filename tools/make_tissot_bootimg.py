@@ -167,12 +167,18 @@ def build_header(kernel_size, kernel_addr, ramdisk_size, ramdisk_addr,
 # ---------------------------------------------------------------------------
 # pack
 # ---------------------------------------------------------------------------
-def pack_bootimg(kernel, ramdisk, dtb, second=b"",
+def pack_bootimg(kernel, ramdisk, dtb, second=b"", adt=b"",
                  page_size=PAGE_SIZE, header_version=0,
                  kernel_addr=KERNEL_ADDR, ramdisk_addr=RAMDISK_ADDR,
                  second_addr=SECOND_ADDR, tags_addr=TAGS_ADDR,
                  name=BOOT_NAME, cmdline=BOOT_CMDLINE,
                  os_version=None, kernel_format="gz-dtb"):
+    """
+    adt: Apple Device Tree (tissot.adt from mkadt.py). XNU reads this via
+         boot_args.deviceTreeP -- it is NOT the Linux FDT in `dtb`. When
+         provided it is appended as a 4th section so the SHIM can find it at a
+         deterministic physical address.
+    """
     """Pack an Android boot image.
 
     kernel_format:
@@ -196,6 +202,10 @@ def pack_bootimg(kernel, ramdisk, dtb, second=b"",
     else:
         raise ValueError(f"unknown kernel_format: {kernel_format!r}")
 
+    # Header SHA-1 follows the Android v0 spec: kernel + ramdisk + second + dtb
+    # only.  The ADT is a HakiOS extension appended *after* those sections; it is
+    # not part of the header id (ABL never inspects it).  We track the ADT
+    # separately so verify_bootimg stays spec-correct.
     sha1 = hashlib.sha1()
     sha1.update(kernel_payload)
     sha1.update(ramdisk)
@@ -221,6 +231,8 @@ def pack_bootimg(kernel, ramdisk, dtb, second=b"",
         parts.append(("second", pad_to(second, page_size)))
     if dtb_section:
         parts.append(("dtb", pad_to(dtb_section, page_size)))
+    if adt:
+        parts.append(("adt", pad_to(adt, page_size)))
 
     img = bytearray()
     layout = []
@@ -334,6 +346,16 @@ def verify_bootimg(data, page_size=PAGE_SIZE):
         msgs.append(f"  second   @ 0x{s_off:06x}  {second_size} bytes")
     msgs.append(f"  dtb      @ 0x{d_off:06x}  {dtb_size} bytes  ({dtb_src})")
 
+    # ---- Apple Device Tree section (our extension) ----
+    adt_off = d_off + pages_for(dtb_size, hdr_page_size) * hdr_page_size
+    adt_region = data[adt_off:]
+    adt_size = len(adt_region)
+    if adt_size:
+        msgs.append(f"  adt      @ 0x{adt_off:06x}  {adt_size} bytes  "
+                    f"(Apple Device Tree)")
+    else:
+        msgs.append(f"  adt      @ 0x{adt_off:06x}  (none)")
+
     # Verify SHA-1 over the bytes exactly as stored
     sha1 = hashlib.sha1()
     sha1.update(kernel_stored)
@@ -397,6 +419,10 @@ def main(argv=None):
     ap.add_argument("--ramdisk", default=None,
                     help="ramdisk file (default: generate a minimal cpio.gz)")
     ap.add_argument("--out", default=os.path.join(prebuilt, "tissot-boot.img"))
+    ap.add_argument("--adt", default=os.path.join(prebuilt, "tissot.adt"),
+                    help="Apple Device Tree (tissot.adt from mkadt.py). "
+                         "XNU reads this via boot_args.deviceTreeP. "
+                         "Pass empty string to omit.")
     ap.add_argument("--no-ramdisk", action="store_true",
                     help="build with an empty ramdisk")
     ap.add_argument("--page-size", type=int, default=PAGE_SIZE)
@@ -430,6 +456,29 @@ def main(argv=None):
     with open(args.dtb, "rb") as f:
         dtb = f.read()
 
+    # ---- ADT (Apple Device Tree) ----
+    adt = b""
+    adt_src = "(none)"
+    if args.adt:
+        if not os.path.isfile(args.adt):
+            print(f"  ADT: not found at {args.adt} (skipping)")
+        else:
+            with open(args.adt, "rb") as f:
+                adt = f.read()
+            adt_src = os.path.relpath(args.adt, root_dir)
+            # sanity: ADT is a DeviceTreeNode; first u32 = nProperties (small, < 256)
+            import struct as _s
+            if len(adt) >= 8:
+                np, nc = _s.unpack_from("<2I", adt, 0)
+                kind = "Apple Device Tree" if 0 < np < 256 and 0 < nc < 256 \
+                    else "unknown (not ADT?)"
+                print(f"  ADT    : {adt_src} ({len(adt)} bytes, {kind}: "
+                      f"root nProps={np} nChildren={nc})")
+            else:
+                print(f"  ADT    : {adt_src} ({len(adt)} bytes, too small)")
+    else:
+        print("  ADT    : (none — XNU will have no device tree)")
+
     # ---- ramdisk ----
     if args.no_ramdisk:
         ramdisk = b""
@@ -454,8 +503,35 @@ def main(argv=None):
 
     # ---- pack ----
     img, layout, sha1_id = pack_bootimg(
-        kernel, ramdisk, dtb, page_size=args.page_size,
-        kernel_format=args.kernel_format)
+        kernel, ramdisk, dtb, adt=adt,
+        page_size=args.page_size, kernel_format=args.kernel_format)
+
+    # ---- report ADT physical address (for the SHIM) ----
+    if adt:
+        ps = args.page_size
+        # Mirror verify_bootimg's section math:
+        #   header(1) + kernel + ramdisk + [second] + [dtb if raw]
+        # In gz-dtb mode the FDT is appended to the kernel payload, so there is
+        # no separate dtb section and the ADT follows the ramdisk directly.
+        off = ps  # header page
+        ksize = struct.unpack_from("<I", img, 8)[0]
+        off += pages_for(ksize, ps) * ps
+        rsize = struct.unpack_from("<I", img, 16)[0]
+        off += pages_for(rsize, ps) * ps
+        ssize = struct.unpack_from("<I", img, 24)[0]
+        off += pages_for(ssize, ps) * ps
+        if args.kernel_format == "raw":
+            if len(img[off:]) >= 8 and struct.unpack(">I", img[off:off+4])[0] == 0xD00DFEED:
+                dsize = struct.unpack(">I", img[off+4:off+8])[0]
+                dsize = pages_for(dsize, ps) * ps
+            else:
+                dsize = 0
+            off += dsize
+        adt_img_off = off
+        adt_phys = KERNEL_ADDR + adt_img_off
+        print(f"  ADT phys addr = 0x{adt_phys:08x} "
+              f"(image offset 0x{adt_img_off:06x})  <- for SHIM boot_args.deviceTreeP")
+        print()
 
     # ---- verify ----
     ok, msgs = verify_bootimg(img, page_size=args.page_size)
@@ -471,6 +547,37 @@ def main(argv=None):
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "wb") as f:
         f.write(img)
+
+    # ---- ADT round-trip: extract embedded ADT, compare to source ----
+    if adt:
+        ok_rt, msgs_rt = verify_bootimg(img, page_size=args.page_size)
+        # re-extract adt section bytes from the written image
+        ps = args.page_size
+        off = ps
+        ksize = struct.unpack_from("<I", img, 8)[0]
+        off += pages_for(ksize, ps) * ps
+        rsize = struct.unpack_from("<I", img, 16)[0]
+        off += pages_for(rsize, ps) * ps
+        ssize = struct.unpack_from("<I", img, 24)[0]
+        off += pages_for(ssize, ps) * ps
+        # dtb section only in raw mode
+        if args.kernel_format == "raw":
+            dsize = len(img) - off  # dtb+adt combined region
+            # we stored dtb then adt; dtb is the FDT-sized chunk
+            if len(img[off:]) >= 8 and struct.unpack(">I", img[off:off+4])[0] == 0xD00DFEED:
+                dsize = struct.unpack(">I", img[off+4:off+8])[0]
+                dsize = pages_for(dsize, ps) * ps
+            else:
+                dsize = 0
+            off += dsize
+        adt_extracted = img[off:off + len(adt)]
+        match = (adt_extracted == adt)
+        print(f"  ADT round-trip: extracted {len(adt_extracted)} bytes from image, "
+              f"{'BYTE-IDENTICAL ✅' if match else 'MISMATCH ❌'}")
+        if not match:
+            print(f"    expected first 16: {adt[:16].hex(' ')}")
+            print(f"    got      first 16: {adt_extracted[:16].hex(' ')}")
+        print()
 
     print(f"  Wrote: {os.path.relpath(args.out, root_dir)}  "
           f"({len(img)} bytes, {pages_for(len(img), args.page_size)} pages)")

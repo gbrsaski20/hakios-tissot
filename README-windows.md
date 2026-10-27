@@ -1,5 +1,10 @@
 # HakiOS-x86 di Windows (via WSL2)
 
+> ⚠️ **Dokumen ini untuk jalur x86_64 (fase 1), BUKAN untuk Mi A1.**
+> Untuk Xiaomi Mi A1 (`tissot`, ARM64), mulai dari
+> [`docs/INSTALL-STEP-BY-STEP.md`](docs/INSTALL-STEP-BY-STEP.md) dan
+> [`README.md`](README.md).
+
 Proyek ini di-build di dalam **WSL2** (Windows Subsystem for Linux), bukan langsung di Windows. Script `build-windows.ps1` menangani semuanya otomatis.
 
 ## Persyaratan
