@@ -76,12 +76,23 @@ else
     for p in "${patches[@]}"; do
         name="$(basename "$p")"
         echo "    - $name"
-        # Already applied? A successful *reverse* dry-run proves it.
-        # (Do not add --forward here: it conflicts with -R.)
-        if patch -p1 -d "$SRC" --dry-run -R -i "$p" >/dev/null 2>&1; then
+
+        # Order matters. A FORWARD dry-run is the only reliable "needs
+        # applying" test: testing reverse first gives false positives for
+        # patches that create new files, because reversing a creation is a
+        # deletion and `patch` treats that as trivially successful.
+        #
+        # `</dev/null` + --batch keep patch from ever prompting
+        # ("File to patch:"), which in CI silently skips the patch.
+        if patch -p1 -d "$SRC" --forward --batch --dry-run -i "$p" </dev/null >/dev/null 2>&1; then
+            if patch -p1 -d "$SRC" --forward --batch --silent -i "$p" </dev/null; then
+                echo "      applied"
+            else
+                echo "      FAILED: dry-run passed but real apply failed"
+                exit 1
+            fi
+        elif patch -p1 -d "$SRC" --batch --dry-run -R -i "$p" </dev/null >/dev/null 2>&1; then
             echo "      already applied (skipped)"
-        elif patch -p1 -d "$SRC" --forward --silent -i "$p"; then
-            echo "      applied"
         else
             echo "      FAILED to apply"
             echo "      Inspect: patch -p1 -d $SRC --dry-run -i $p"
@@ -90,21 +101,35 @@ else
     done
 fi
 
-# ---- sanity check ----
+# ---- sanity check: every patch must leave its markers behind ----
 echo ""
 echo ">>> sanity check"
-if [ -f "$SRC/pexpert/pexpert/arm64/TISSOT.h" ]; then
-    echo "    TISSOT.h present"
-else
-    echo "    ERROR: TISSOT.h missing — patch did not apply"
+fail=0
+need_file() {
+    if [ -f "$SRC/$1" ]; then echo "    ok   $1"
+    else echo "    MISSING FILE  $1"; fail=1; fi
+}
+need_grep() {
+    if grep -q "$2" "$SRC/$1" 2>/dev/null; then echo "    ok   $1 :: $2"
+    else echo "    MISSING MARK  $1 :: $2"; fail=1; fi
+}
+
+# patch 0001
+need_file "pexpert/pexpert/arm64/TISSOT.h"
+need_grep "makedefs/MakeInc.def" "MACHINE_FLAGS_ARM64_TISSOT"
+need_grep "pexpert/pexpert/arm64/board_config.h" "ARM64_BOARD_CONFIG_TISSOT"
+# patch 0002
+need_grep "pexpert/pexpert/arm/protos.h" "SERIAL_TISSOT_UART"
+need_grep "pexpert/arm/pe_serial.c" "tissot_uart_init"
+
+if [ "$fail" -ne 0 ]; then
+    echo ""
+    echo ">>> ERROR: patch results incomplete (see MISSING above)"
+    echo "    A patch may have partially applied. Inspect:"
+    echo "      cd $SRC && patch -p1 --dry-run -i <patch>"
     exit 1
 fi
-if grep -q "MACHINE_FLAGS_ARM64_TISSOT" "$SRC/makedefs/MakeInc.def"; then
-    echo "    MACHINE_FLAGS_ARM64_TISSOT registered"
-else
-    echo "    ERROR: tissot machine config missing"
-    exit 1
-fi
+echo "    all patch markers present"
 
 echo ""
 echo ">>> Done. Next:"

@@ -357,6 +357,7 @@ fastboot reboot
 | `Image not a valid arm64 kernel` | kernel bukan format `Image` | pastikan hasil build XNU, bukan ELF |
 | Bootloop setelah `flash boot` | kernel salah | G1 (flash boot stock) |
 | Actions gagal di `ctf_insert` | runner tanpa cctools penuh | lihat C4 |
+| Actions: `File to patch:` lalu `N out of N hunks ignored` | patch sebelumnya salah terdeteksi "already applied" (bug `apply-8020.sh`) | sudah diperbaiki: deteksi pakai *forward* dry-run dulu |
 | IPSW tidak bisa dibuka | download belum selesai | cek ukuran = 5.777.710.157 byte |
 
 ---
