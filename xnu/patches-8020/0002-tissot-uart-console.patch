@@ -1,0 +1,154 @@
+--- a/pexpert/pexpert/arm/protos.h
++++ b/pexpert/pexpert/arm/protos.h
+@@ -40,7 +40,8 @@
+ 	SERIAL_DOCKCHANNEL=0x2,
+ 	SERIAL_PI3_UART=0x4,
+ 	SERIAL_VMAPPLE_UART=0x8,
+-	SERIAL_DCC_UART=0x10
++	SERIAL_DCC_UART=0x10,
++	SERIAL_TISSOT_UART=0x20
+ } serial_device_t;
+ 
+ kern_return_t serial_enable_irq(serial_device_t device);
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -653,6 +653,73 @@
+ 
+ #endif /* PI3_UART */
+ 
++/****************************************************************************/
++#ifdef ARM64_BOARD_CONFIG_TISSOT
++#include <pexpert/arm64/TISSOT.h>
++
++/*
++ * Xiaomi Mi A1 (tissot) — BLSP1 UART1 debug console (ttyHSL0, 0x078AF000).
++ *
++ * The Qualcomm bootloader (ABL) has already programmed the baud rate because
++ * `console=ttyHSL0,115200,n8` is on the kernel command line, so init() only
++ * has to make sure the transmitter is enabled. Re-programming the divisor
++ * here would risk breaking the console the bootloader set up.
++ *
++ * NOTE: this driver is a DRAFT. It has not been compiled or run on hardware.
++ * The register offsets follow msm_serial_hs.c and must be validated.
++ */
++vm_offset_t tissot_uart_base_vaddr = 0;
++
++static unsigned int
++tissot_uart_tr0(void)
++{
++	return (unsigned int) (TISSOT_GET32(tissot_uart_base_vaddr + TISSOT_UART_DM_SR)
++	    & TISSOT_UART_DM_SR_TX_READY);
++}
++
++static void
++tissot_uart_td0(uint8_t c)
++{
++	while (!tissot_uart_tr0()) {
++		/* spin until the TX FIFO has room */
++	}
++	TISSOT_PUT32(tissot_uart_base_vaddr + TISSOT_UART_DM_TF, (uint32_t) c);
++}
++
++static unsigned int
++tissot_uart_rr0(void)
++{
++	return (unsigned int) (TISSOT_GET32(tissot_uart_base_vaddr + TISSOT_UART_DM_SR)
++	    & TISSOT_UART_DM_SR_RX_READY);
++}
++
++static uint8_t
++tissot_uart_rd0(void)
++{
++	return (uint8_t) TISSOT_GET32(tissot_uart_base_vaddr + TISSOT_UART_DM_RF);
++}
++
++static void
++tissot_uart_init(void)
++{
++	uint32_t cr = TISSOT_GET32(tissot_uart_base_vaddr + TISSOT_UART_DM_CR);
++
++	cr |= (TISSOT_UART_DM_CR_TX_ENABLE | TISSOT_UART_DM_CR_RX_ENABLE);
++	TISSOT_PUT32(tissot_uart_base_vaddr + TISSOT_UART_DM_CR, cr);
++}
++
++SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) tissot_uart_serial_functions =
++{
++	.init = tissot_uart_init,
++	.transmit_ready = tissot_uart_tr0,
++	.transmit_data = tissot_uart_td0,
++	.receive_ready = tissot_uart_rr0,
++	.receive_data = tissot_uart_rd0,
++	.device = SERIAL_TISSOT_UART
++};
++
++#endif /* ARM64_BOARD_CONFIG_TISSOT */
++
+ /*****************************************************************************/
+ 
+ #ifdef VMAPPLE_UART
+@@ -852,6 +919,25 @@
+ 	}
+ #endif /* PI3_UART */
+ 
++#ifdef ARM64_BOARD_CONFIG_TISSOT
++	/*
++	 * The ADT must expose an "arm-io" node with a "ranges" property (so
++	 * pe_arm_get_soc_base_phys() returns non-zero) and a "serial" node
++	 * whose "reg" is the UART offset relative to that base.
++	 *
++	 * TODO(tissot): this depends on mkadt.py, which does not exist yet.
++	 * Until the ADT provides those nodes, this block is a no-op and the
++	 * kernel will have no console output at all.
++	 */
++	if (SecureDTFindEntry("name", "serial", &entryP) == kSuccess) {
++		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
++		tissot_uart_base_vaddr = ml_io_map(soc_base + *reg_prop, *(reg_prop + 1));
++	}
++	if (tissot_uart_base_vaddr != 0) {
++		register_serial_functions(&tissot_uart_serial_functions);
++	}
++#endif /* ARM64_BOARD_CONFIG_TISSOT */
++
+ #ifdef VMAPPLE_UART
+ 	if (SecureDTFindEntry("name", "uart0", &entryP) == kSuccess) {
+ 		SecureDTGetProperty(entryP, "reg", (void const **)&reg_prop, &prop_size);
+--- a/pexpert/pexpert/arm64/TISSOT.h
++++ b/pexpert/pexpert/arm64/TISSOT.h
+@@ -10,7 +10,7 @@
+  * Console UART: BLSP1 UART1, physical base 0x078AF000 (ttyHSL0 in the
+  * stock Android kernel). Verified against the stock tissot device tree.
+  *
+- * This file is added by xnu/patches-8020/0001-add-tissot-board-config.patch.
++ * Added by xnu/patches-8020/0001-add-tissot-board-config.patch.
+  */
+ 
+ #ifndef _PEXPERT_ARM_TISSOT_H
+@@ -37,6 +37,28 @@
+ #define TISSOT_UART_BASE_PADDR    0x078AF000ULL
+ #define TISSOT_UART_SIZE          0x200
+ 
++/*
++ * MSM UARTDM register offsets, matching the Linux driver
++ * drivers/tty/serial/msm_serial_hs.c (what Android uses for ttyHSL0 on
++ * this SoC).
++ *
++ * TODO(tissot): verify every offset on hardware before trusting serial.
++ */
++#define TISSOT_UART_DM_MR         0x00
++#define TISSOT_UART_DM_IPR        0x04
++#define TISSOT_UART_DM_SR         0x08
++#define TISSOT_UART_DM_CR         0x0C
++#define TISSOT_UART_DM_RF         0x70  /* read:  RX FIFO */
++#define TISSOT_UART_DM_TF         0x70  /* write: TX FIFO */
++
++/* UARTDM_SR bits */
++#define TISSOT_UART_DM_SR_RX_READY  0x01
++#define TISSOT_UART_DM_SR_TX_READY  0x04
++
++/* UARTDM_CR bits */
++#define TISSOT_UART_DM_CR_RX_ENABLE 0x01
++#define TISSOT_UART_DM_CR_TX_ENABLE 0x04
++
+ #define TISSOT_BREAK              asm volatile("brk #0");
+ 
+ #define TISSOT_PUT32(addr, value) do { *((volatile uint32_t *)(addr)) = (value); } while (0)

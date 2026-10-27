@@ -1,0 +1,122 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -32,7 +32,7 @@
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+ SUPPORTED_ARM_MACHINE_CONFIGS = NONE
+-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 VMAPPLE
++SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 VMAPPLE TISSOT
+ 
+ endif
+ 
+@@ -63,6 +63,9 @@
+ MACHINE_FLAGS_ARM64_T6000 = -DARM64_BOARD_CONFIG_T6000 			-mcpu=apple-a14
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a
+ MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
++# HakiOS: Xiaomi Mi A1 (tissot) — Qualcomm MSM8953, 8x Cortex-A53 (ARMv8.0-A).
++# No -mcpu=apple-*: build for the baseline A53 core.
++MACHINE_FLAGS_ARM64_TISSOT = -DARM64_BOARD_CONFIG_TISSOT		-mcpu=cortex-a53
+ 
+ 
+ #
+@@ -248,10 +251,16 @@
+ # Without embdedded device map, use a default arch string
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
+ ifneq ($(filter ARM64,$(CURRENT_ARCH_CONFIG)),)
++# HakiOS: non-Apple SoCs have no Pointer Authentication (Cortex-A53 = ARMv8.0-A),
++# so build plain arm64 instead of arm64e.
++ifneq ($(filter TISSOT,$(CURRENT_MACHINE_CONFIG)),)
++export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64
++else
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+ endif
+ endif
+ endif
++endif
+ 
+ #
+ # This can have false negatives, and is used to avoid calling CTF when we'll build a static KC
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -72,6 +72,20 @@
+ #define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
+ #endif  /* ARM64_BOARD_CONFIG_BCM2837 */
+ 
++/*
++ * HakiOS: Xiaomi Mi A1 (tissot) — Qualcomm MSM8953.
++ * 8x Cortex-A53 in a single cluster, ARMv8.0-A, no PAC, no Apple monitor.
++ */
++#ifdef ARM64_BOARD_CONFIG_TISSOT
++#include <pexpert/arm64/TISSOT.h>
++
++#define MAX_L2_CLINE                   6 /* A53 L2 cache line = 64B (2^6) */
++#define MAX_CPUS                       8
++#define MAX_CPU_CLUSTERS               1
++
++#define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
++#endif  /* ARM64_BOARD_CONFIG_TISSOT */
++
+ #ifdef ARM64_BOARD_CONFIG_VMAPPLE
+ #include <pexpert/arm64/VMAPPLE.h>
+ 
+--- a/pexpert/pexpert/arm64/TISSOT.h
++++ b/pexpert/pexpert/arm64/TISSOT.h
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (c) 2026 HakiOS project. All rights reserved.
++ *
++ * TISSOT.h — board configuration for Xiaomi Mi A1 (Qualcomm MSM8953).
++ *
++ * MSM8953 (Snapdragon 625) is 8x Cortex-A53, ARMv8.0-A, single cluster.
++ * It has no Pointer Authentication and no Apple monitor, so this file is
++ * modelled on the BCM2837 (Raspberry Pi 3) config — also a Cortex-A53.
++ *
++ * Console UART: BLSP1 UART1, physical base 0x078AF000 (ttyHSL0 in the
++ * stock Android kernel). Verified against the stock tissot device tree.
++ *
++ * This file is added by xnu/patches-8020/0001-add-tissot-board-config.patch.
++ */
++
++#ifndef _PEXPERT_ARM_TISSOT_H
++#define _PEXPERT_ARM_TISSOT_H
++
++#define NO_MONITOR 1
++#define NO_ECORE 1
++
++#define TISSOT 1
++#define MSM8953 1
++
++#define ARM_ARCH_TIMER
++
++#define __ARM_ARCH__              8
++#define __ARM_VMSA__              8
++#define __ARM_VFP__               4
++#define __ARM_COHERENT_CACHE__    1
++#define __ARM_DEBUG__             7
++#define __ARM64_PMAP_SUBPAGE_L1__ 1
++
++#ifndef ASSEMBLER
++
++/* ---- debug console: BLSP1 UART1 @ 0x078AF000 ---- */
++#define TISSOT_UART_BASE_PADDR    0x078AF000ULL
++#define TISSOT_UART_SIZE          0x200
++
++#define TISSOT_BREAK              asm volatile("brk #0");
++
++#define TISSOT_PUT32(addr, value) do { *((volatile uint32_t *)(addr)) = (value); } while (0)
++#define TISSOT_GET32(addr)        *((volatile uint32_t *)(addr))
++
++/*
++ * Panic log buffer.
++ * TODO(tissot): pick a DRAM window that the bootloader leaves untouched and
++ * that the kernel's early VM does not map. 0x9FF00000 (top of the 4 GiB
++ * physical window, just below the 0xA0000000 peripheral block) is a
++ * placeholder — it MUST be validated against the real memory map before
++ * relying on panic logs.
++ */
++#define PLATFORM_PANIC_LOG_PADDR  0x9FF00000ULL
++#define PLATFORM_PANIC_LOG_SIZE   16384
++
++#endif /* ! ASSEMBLER */
++
++#endif /* ! _PEXPERT_ARM_TISSOT_H */

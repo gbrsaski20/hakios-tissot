@@ -1,0 +1,88 @@
+name: xnu-tissot
+
+# Build XNU 8020 (iOS 15) for Xiaomi Mi A1 (tissot / MSM8953).
+#
+# XNU cannot be built on Windows/Linux with a plain toolchain: it needs
+# clang + Apple cctools (ld, ctf_insert, kextsymboltool) + an SDK, and the
+# build system assumes macOS. A GitHub macOS runner provides all of that
+# for free on public repositories.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "xnu/patches-8020/**"
+      - "xnu/apply-8020.sh"
+      - "xnu-build-arm64.sh"
+      - ".github/workflows/xnu-tissot.yml"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify iOS SDK (PLATFORM=iPhoneOS comes from this)
+        run: |
+          echo "xcodebuild: $(xcodebuild -version | head -1)"
+          SDK="$(xcrun -sdk iphoneos -show-sdk-path)"
+          echo "iphoneos SDK: $SDK"
+          echo "platform    : $(xcrun -sdk iphoneos -show-sdk-platform-path)"
+          test -n "$SDK"
+          xcrun -sdk iphoneos --find clang
+          xcrun -sdk iphoneos --find ld
+
+      - name: Report host toolchain
+        run: |
+          echo "host: $(uname -a)"
+          xcodebuild -version || true
+          clang --version | head -2 || true
+          for t in ld ctf_insert kextsymboltool make; do
+            printf '%-16s ' "$t"; command -v "$t" || echo "MISSING"
+          done
+          echo "SDKROOT=$SDKROOT"
+
+      - name: Fetch XNU 8020 and apply tissot patches
+        run: |
+          chmod +x xnu/apply-8020.sh xnu-build-arm64.sh
+          ./xnu/apply-8020.sh
+
+      - name: Toolchain check (informational)
+        continue-on-error: true
+        run: ./xnu-build-arm64.sh --check
+
+      - name: Build kernel (DEVELOPMENT)
+        shell: bash
+        run: |
+          set -o pipefail
+          ./xnu-build-arm64.sh --force --config DEVELOPMENT --jobs 4 2>&1 | tee build.log
+
+      - name: List build output
+        if: always()
+        run: |
+          echo "--- BUILD/obj ---"
+          find xnu-src-8020/BUILD -maxdepth 2 -type f -name 'kernel.*' 2>/dev/null || true
+          ls -la prebuilt 2>/dev/null || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload kernel artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xnu-tissot-kernel
+          path: |
+            prebuilt/tissot-kernel-arm64.Image
+            xnu-src-8020/BUILD/obj/**/kernel.*
+          if-no-files-found: warn
+          retention-days: 14

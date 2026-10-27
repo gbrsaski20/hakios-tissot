@@ -43,7 +43,8 @@ MAKE     ?= make
 .DEFAULT_GOAL := help
 
 .PHONY: help x86-open x86-full qemu-open qemu clean distclean \
-        kernel loader userland images deps
+        kernel loader userland images deps tissot tissot-clean \
+        xnu8020 xnu8020-check
 
 help:
 	@echo "HakiOS-x86 — XNU kernel on x86_64 PC/QEMU"
@@ -55,6 +56,10 @@ help:
 	@echo "  make qemu         Run full iOS user space in QEMU"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make distclean    Remove everything"
+	@echo ""
+	@echo "Mi A1 / tissot (ARM64) targets:"
+	@echo "  make tissot       Build flashable tissot-boot.img (no compiler needed)"
+	@echo "  make tissot-clean Remove tissot artifacts"
 	@echo ""
 	@echo "Variables:"
 	@echo "  JOBS=$(JOBS)          Parallel build jobs"
@@ -114,6 +119,43 @@ userland:
 
 images: userland
 	@echo ">>> Images are built as part of userland."
+
+# ============================================================================
+# Mi A1 (tissot / MSM8953) — ARM64 Android boot image
+#
+# Pure Python: no mkbootimg, no dtc, no compiler required.
+# Produces a valid Android boot image (header v0, page 2048) containing
+# an ARM64 Image + device tree + ramdisk.
+# ============================================================================
+
+PYTHON ?= python3
+
+tissot:
+	@echo ">>> Building Mi A1 (tissot) ARM64 boot image..."
+	@$(PYTHON) tools/build_kernel_placeholder_arm64.py
+	@$(PYTHON) tools/build_tissot_dtb.py
+	@$(PYTHON) tools/make_tissot_bootimg.py
+	@echo ""
+	@echo ">>> Done. Flash to Mi A1 (unlocked bootloader):"
+	@echo "      fastboot boot prebuilt/tissot-boot.img"
+
+tissot-clean:
+	@echo ">>> Removing tissot artifacts..."
+	@rm -f prebuilt/tissot-boot.img prebuilt/tissot.dtb prebuilt/tissot.dts \
+		prebuilt/tissot-kernel-arm64.Image prebuilt/tissot-ramdisk.cpio.gz
+	@echo ">>> Done."
+
+# ============================================================================
+# XNU 8020 (iOS 15) — fetch source + apply HakiOS/tissot patches
+# Building the kernel itself needs macOS + cctools + SDK (see
+# docs/XNU8020-PORT-PLAN.md).
+# ============================================================================
+
+xnu8020:
+	@./xnu/apply-8020.sh
+
+xnu8020-check:
+	@./xnu-build-arm64.sh --check
 
 # ============================================================================
 # Open build: kernel + placeholder loader + tiny user space (no IPSW)

@@ -58,3 +58,33 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# ---------------------------------------------------------------------------
+# XNU 8020 (iOS 15) — source hasil xnu/apply-8020.sh (~77 MB, jangan di-commit)
+# ---------------------------------------------------------------------------
+xnu-src-8020/
+BUILD/
+
+# Firmware download sementara
+*.tgz
+*.fdmdownload
+*.crdownload
+*.part
+
+# Artefak tissot (boot image / kernel / dtb hasil ekstrak)
+prebuilt/*.Image
+prebuilt/*.dtb
+prebuilt/*.cpio.gz
+devices/tissot/dt/*.img
+devices/tissot/dt/*.dtb
+devices/tissot/dt/*.im4p
+devices/tissot/dt/*.lzfse
+devices/tissot/dt/*.adt
+*.simg
+
+# Patch rejects / backup
+*.rej
+*.orig
+
+# Catatan internal agent (bukan bagian dari proyek)
+.workbuddy-ai/
