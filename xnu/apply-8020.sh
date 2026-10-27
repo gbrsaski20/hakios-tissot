@@ -25,6 +25,24 @@ PATCHES="$SCRIPT_DIR/patches-8020"
 URL="https://github.com/apple-oss-distributions/xnu/archive/refs/tags/${TAG}.tar.gz"
 TARBALL="$ROOT/xnu-deps/build/${TAG}.tar.gz"
 
+# Stamp file: records a hash of the whole patch set that has been applied to
+# $SRC. Needed because "is this patch already applied?" cannot be answered
+# reliably by a reverse dry-run once a LATER patch has rewritten the same
+# lines: 0002 and 0003 both edit the header comment of TISSOT.h, so reversing
+# 0002 on a fully patched tree fails and the script would conclude "not
+# applied" and try to apply it forward. The stamp makes re-runs deterministic.
+STAMP="$SRC/.haki-patchset"
+
+patch_hash() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        cat "$PATCHES"/*.patch | sha256sum | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        cat "$PATCHES"/*.patch | shasum -a 256 | cut -d' ' -f1
+    else
+        cat "$PATCHES"/*.patch | cksum | tr -d ' '
+    fi
+}
+
 echo ""
 echo "============================================================"
 echo "  XNU 8020 (iOS 15) source + HakiOS/tissot patches"
@@ -73,32 +91,48 @@ patches=("$PATCHES"/*.patch)
 if [ ${#patches[@]} -eq 0 ]; then
     echo "    (no patches found in $PATCHES)"
 else
-    for p in "${patches[@]}"; do
-        name="$(basename "$p")"
-        echo "    - $name"
+    WANT_HASH="$(patch_hash)"
+    if [ -f "$STAMP" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$WANT_HASH" ]; then
+        echo "    sudah diterapkan sebelumnya (stamp cocok: ${WANT_HASH})"
+        echo "    patch set tidak berubah sejak terakhir apply, melewati langkah ini"
+    else
+        if [ -f "$STAMP" ]; then
+            echo "    CATATAN: stamp ada tapi hash berbeda — patch set berubah."
+            echo "             Kalau source ini sudah dipatch, jalankan --refetch."
+        fi
+        for p in "${patches[@]}"; do
+            name="$(basename "$p")"
+            echo "    - $name"
 
-        # Order matters. A FORWARD dry-run is the only reliable "needs
-        # applying" test: testing reverse first gives false positives for
-        # patches that create new files, because reversing a creation is a
-        # deletion and `patch` treats that as trivially successful.
-        #
-        # `</dev/null` + --batch keep patch from ever prompting
-        # ("File to patch:"), which in CI silently skips the patch.
-        if patch -p1 -d "$SRC" --forward --batch --dry-run -i "$p" </dev/null >/dev/null 2>&1; then
-            if patch -p1 -d "$SRC" --forward --batch --silent -i "$p" </dev/null; then
-                echo "      applied"
+            # Order matters. A FORWARD dry-run is the only reliable "needs
+            # applying" test: testing reverse first gives false positives for
+            # patches that create new files, because reversing a creation is a
+            # deletion and `patch` treats that as trivially successful.
+            #
+            # `</dev/null` + --batch keep patch from ever prompting
+            # ("File to patch:"), which in CI silently skips the patch.
+            if patch -p1 -d "$SRC" --forward --batch --dry-run -i "$p" </dev/null >/dev/null 2>&1; then
+                if patch -p1 -d "$SRC" --forward --batch --silent -i "$p" </dev/null; then
+                    echo "      applied"
+                else
+                    echo "      FAILED: dry-run passed but real apply failed"
+                    exit 1
+                fi
+            elif patch -p1 -d "$SRC" --batch --dry-run -R -i "$p" </dev/null >/dev/null 2>&1; then
+                echo "      already applied (skipped)"
             else
-                echo "      FAILED: dry-run passed but real apply failed"
+                echo "      FAILED to apply"
+                echo "      Kalau tree ini sudah dipatch penuh, kegagalan ini normal:"
+                echo "      patch yang lebih baru (mis. 0003) menulis ulang baris yang"
+                echo "      sama, sehingga reverse dry-run patch lama ikut gagal."
+                echo "      Solusi: ./xnu/apply-8020.sh --refetch"
+                echo "      Periksa manual: patch -p1 -d $SRC --dry-run -i $p"
                 exit 1
             fi
-        elif patch -p1 -d "$SRC" --batch --dry-run -R -i "$p" </dev/null >/dev/null 2>&1; then
-            echo "      already applied (skipped)"
-        else
-            echo "      FAILED to apply"
-            echo "      Inspect: patch -p1 -d $SRC --dry-run -i $p"
-            exit 1
-        fi
-    done
+        done
+        printf '%s\n' "$WANT_HASH" > "$STAMP"
+        echo "    stamp ditulis: $STAMP"
+    fi
 fi
 
 # ---- sanity check: every patch must leave its markers behind ----
@@ -139,6 +173,8 @@ need_grep "makedefs/MakeInc.def" "Not every SDK ships usr/local/include/kernel"
 need_absent "makedefs/MakeInc.def" "enable-trivial-auto-var-init-zero"
 # patch 0006 (warning clang baru)
 need_grep "makedefs/MakeInc.def" "Wno-reserved-identifier"
+# patch 0007 (ekspor TISSOT.h ke EXPORT_HDRS)
+need_grep "pexpert/pexpert/arm64/Makefile" "TISSOT.h"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

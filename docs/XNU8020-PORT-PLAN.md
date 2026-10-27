@@ -387,7 +387,7 @@ Yang masih menghalangi, berurutan menurut besar-kecilnya:
 1. **SHIM** — belum ada kode yang menyambut kendali dari ABL dan menyiapkan
    MMU/page table sebelum melompat ke `_start` XNU. Tanpa ini kernel tidak
    akan pernah dieksekusi.
-2. **Build kernel di macOS** — patch 0001–0006 baru mencapai tahap kompilasi.
+2. **Build kernel di macOS** — patch 0001–0007 baru mencapai tahap kompilasi.
    Error compiler pertama akan menjadi petunjuk patch berikutnya.
 3. **Verifikasi hardware** — group 0/1 GIC dan offset register UART hanya
    bisa dipastikan di Mi A1 asli.

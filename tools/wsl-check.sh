@@ -7,7 +7,7 @@
 #
 # Yang DIPERIKSA di sini:
 #   1. tool yang dibutuhkan (python3, patch, git, tar, curl/wget)
-#   2. patch 0001..0006 apply bersih ke source XNU pristine
+#   2. patch 0001..0007 apply bersih ke source XNU pristine
 #   3. penanda tiap patch benar-benar ada (sama seperti job patches)
 #   4. TISSOT dipetakan ke arm64, bukan arm64e (Cortex-A53 tanpa PAC)
 #   5. -mcpu=cortex-a53 ada di MACHINE_FLAGS_ARM64_TISSOT
@@ -140,6 +140,7 @@ chk makedefs/MakeInc.def                    "Wno-missing-include-dirs"
 chk makedefs/MakeInc.def                    "Not every SDK ships usr/local/include/kernel"
 chk_absent makedefs/MakeInc.def             "enable-trivial-auto-var-init-zero"
 chk makedefs/MakeInc.def                    "Wno-reserved-identifier"
+chk pexpert/pexpert/arm64/Makefile          "TISSOT.h"
 
 # ---------------------------------------------------------------------------
 # 4. TISSOT harus arm64, bukan arm64e

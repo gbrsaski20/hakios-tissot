@@ -21,8 +21,9 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0004-availability-pl-host-sdk.patch` | `bsd/sys/make_symbol_aliasing.sh`: `availability.pl` sudah **tidak ada di Xcode 26** (tidak di SDK iPhoneOS, tidak di SDK macOS, tidak di `/usr/local`). Patch ini mencari target SDK -> host SDK -> daftar versi bawaan, supaya build tidak mati di `_symbol_aliasing.h` |
 | `patches-8020/0005-clang-modern-compat.patch` | Kompatibilitas clang Xcode 26: buang `-enable-trivial-auto-var-init-zero-...` (sudah dihapus dari clang, dan `-ftrivial-auto-var-init=zero` sudah ada di baris atasnya), jaga `-I$(SDKROOT)/usr/local/include/kernel` dengan `wildcard`, matikan `-Wmissing-include-dirs` |
 | `patches-8020/0006-clang-reserved-identifier.patch` | Matikan `-Wreserved-identifier`. `-Weverything` + `-Werror` mengubah setiap `__int8_t`/`__uint8_t` di `bsd/arm/_types.h` jadi error — satu objek melaporkan **156 errors** dari satu diagnosa yang sama |
+| `patches-8020/0007-export-tissot-header.patch` | Tambahkan `TISSOT.h` ke `PRIVATE_KERNELFILES` di `pexpert/pexpert/arm64/Makefile`. Tanpa ini header itu tidak pernah disalin ke `BUILD/obj/EXPORT_HDRS/`, sehingga `#include <pexpert/arm64/TISSOT.h>` di `board_config.h:80` mati dengan *file not found* |
 
-## Kenapa enam patch itu perlu
+## Kenapa tujuh patch itu perlu
 
 **0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
 ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
@@ -56,6 +57,22 @@ Gejalanya menyesatkan — yang muncul cuma `make[5]: *** [_symbol_aliasing.h]
 Error 1` lalu `Error 2` dua tingkat di atasnya. Patch ini memakai salinan
 dari SDK macOS (skrip perl yang sama, mendukung `--ios` maupun `--macosx`),
 dan tetap mengeluarkan error asli kalau dua-duanya tidak ada.
+
+**0005, 0006, 0007 — tiga hal yang baru terlihat setelah build benar-benar
+sampai ke compiler.** Ketiganya bukan soal tissot; build XNU open-source mana
+pun dengan Xcode 26 akan kena:
+
+- `-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang`
+  sudah dihapus dari clang. `-ftrivial-auto-var-init=zero` tepat di baris
+  atasnya sudah melakukan hal yang sama.
+- `-I$(SDKROOT)/usr/local/include/kernel` menunjuk direktori yang tidak ada di
+  SDK iPhoneOS. Dengan `-Weverything` itu jadi error keras, jadi sekarang
+  dibungkus `ifneq ($(wildcard ...),)`.
+- `-Wreserved-identifier` (diagnosa baru clang) menandai `__int8_t` /
+  `__uint8_t` di `bsd/arm/_types.h`: **156 error** dari satu diagnosa.
+- `TISSOT.h` harus masuk `PRIVATE_KERNELFILES`, karena hanya header yang
+  terdaftar di situ yang disalin ke `EXPORT_HDRS/` — tempat semua
+  `#include <pexpert/arm64/...>` dicari.
 
 ## Cara pakai
 

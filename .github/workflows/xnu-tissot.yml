@@ -16,7 +16,7 @@ name: xnu-tissot
 #   Kamu tidak perlu punya Mac: repo publik dapat menit macOS gratis.
 #
 # Tiga job:
-#   patches  (ubuntu-latest)  — verifikasi patch 0001..0006 apply bersih ke
+#   patches  (ubuntu-latest)  — verifikasi patch 0001..0007 apply bersih ke
 #                               source XNU pristine. Cepat, tanpa macOS.
 #                               Ini yang menangkap patch rusak lebih dulu.
 #   kernel   (macos-latest)   — build kernel ARM64 sungguhan (mach.* TISSOT).
@@ -67,7 +67,7 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — verifikasi patch series (Linux, tanpa macOS)
   #
-  # Mengunduh xnu-8020.140.41, menerapkan 0001..0006 berurutan, lalu memastikan
+  # Mengunduh xnu-8020.140.41, menerapkan 0001..0007 berurutan, lalu memastikan
   # setiap penanda patch benar-benar ada. Kalau ada yang gagal di sini, build
   # kernel di job 2 pasti juga gagal — jadi ini gerbang cepat.
   # --------------------------------------------------------------------------
@@ -123,6 +123,8 @@ jobs:
           check makedefs/MakeInc.def                 Not every SDK ships usr/local/include/kernel
           echo "--- patch 0006: warning clang baru ---"
           check makedefs/MakeInc.def                 Wno-reserved-identifier
+          echo "--- patch 0007: ekspor TISSOT.h ---"
+          check pexpert/pexpert/arm64/Makefile       TISSOT.h
           if grep -q 'enable-trivial-auto-var-init-zero' "$SRC/makedefs/MakeInc.def"; then
             echo '  FAIL  flag clang lama masih ada'; exit 1
           fi
@@ -338,17 +340,37 @@ jobs:
           # ::error:: supaya kelihatan di tab Checks tanpa perlu login untuk
           # mengunduh artefak.
           #
-          # Prioritas: baris 'error:' PERTAMA (itu akar masalahnya; 156 error
-          # berikutnya biasanya cuma efek berantai), lalu 2 baris sesudahnya.
-          # Kalau tidak ada 'error:', pakai 3 baris sebelum 'make: ***'.
+          # Dua lapis:
+          #   1. error PERTAMA + 2 baris konteks — ini akar masalahnya.
+          #   2. semua error yang BERBEDA (dedup per pesan, maks 25) — supaya
+          #      satu run memperlihatkan seluruh daftar masalah, bukan satu
+          #      per run. Nomor baris tetap ikut supaya bisa ditelusuri.
           if [ -s "$LOG" ]; then
             first="$(grep -n -m1 -E 'error:' "$LOG" | cut -d: -f1)"
             if [ -n "$first" ]; then
+              echo "::error::=== AKAR MASALAH (error pertama, baris $first) ==="
               end=$((first + 2))
               sed -n "${first},${end}p" "$LOG" | while IFS= read -r l; do
                 [ -n "$l" ] || continue
                 echo "::error::$(printf '%s' "$l" | cut -c1-280)"
               done
+
+              n_all="$(grep -c -E 'error:' "$LOG" || true)"
+              n_uniq="$(grep -E 'error:' "$LOG" | awk '
+                { msg = $0; sub(/^.*error:[[:space:]]*/, "", msg) }
+                !seen[msg]++ { c++ }
+                END { print c + 0 }')"
+              echo "::error::=== RINGKASAN: ${n_all} baris error, ${n_uniq} pesan berbeda ==="
+
+              if [ "${n_uniq:-0}" -gt 1 ]; then
+                echo "::error::=== SEMUA PESAN ERROR YANG BERBEDA ==="
+                grep -E 'error:' "$LOG" | awk '
+                  { msg = $0; sub(/^.*error:[[:space:]]*/, "", msg) }
+                  !seen[msg]++ { print }
+                ' | head -25 | while IFS= read -r l; do
+                  echo "::error::$(printf '%s' "$l" | cut -c1-280)"
+                done
+              fi
             else
               mk="$(grep -n -m1 -E "make(\[[0-9]+\])?: \*\*\*" "$LOG" | cut -d: -f1)"
               if [ -n "$mk" ]; then
