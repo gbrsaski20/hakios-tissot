@@ -1,0 +1,451 @@
+--- a/pexpert/pexpert/arm64/TISSOT.h
++++ b/pexpert/pexpert/arm64/TISSOT.h
+@@ -10,7 +10,14 @@
+  * Console UART: BLSP1 UART1, physical base 0x078AF000 (ttyHSL0 in the
+  * stock Android kernel). Verified against the stock tissot device tree.
+  *
+- * Added by xnu/patches-8020/0001-add-tissot-board-config.patch.
++ * Interrupt controller: ARM GIC-400 (GICv2), NOT Apple's AIC. XNU only
++ * ships an AIC driver plus a GICv3 path (HAS_GIC_V3, VMAPPLE-only), so this
++ * file defines the GICv2 register map and TISSOT_GIC_V2 switches on the
++ * driver in pexpert/arm/pe_fiq.c and osfmk/arm64/sleh.c.
++ *
++ * This file is added by xnu/patches-8020/0001-add-tissot-board-config.patch
++ * and extended by 0002-tissot-uart-console.patch and
++ * 0003-tissot-gicv2-interrupts.patch.
+  */
+ 
+ #ifndef _PEXPERT_ARM_TISSOT_H
+@@ -59,6 +66,82 @@
+ #define TISSOT_UART_DM_CR_RX_ENABLE 0x01
+ #define TISSOT_UART_DM_CR_TX_ENABLE 0x04
+ 
++/* ========================================================================
++ * GIC-400 (GICv2) — MSM8953
++ * ========================================================================
++ *
++ * Absolute physical addresses (mainline qcom/msm8953.dtsi):
++ *   GICD (distributor)      0x0B000000  0x1000
++ *   GICC (CPU interface)    0x0B002000  0x2000
++ *
++ * XNU maps interrupt-controller MMIO as `soc_base + reg`, where soc_base is
++ * the arm-io "ranges" parent (0x07800000 on tissot, see mkadt.py), so the
++ * ADT carries these as offsets from that base.
++ */
++#define TISSOT_GIC_V2 1
++
++#define TISSOT_GIC_BASE_PADDR     0x0B000000ULL
++#define TISSOT_SOC_BASE_PADDR     0x07800000ULL
++
++#define TISSOT_GIC_DIST_OFFSET    (TISSOT_GIC_BASE_PADDR - TISSOT_SOC_BASE_PADDR) /* 0x03800000 */
++#define TISSOT_GIC_DIST_SIZE      0x1000
++#define TISSOT_GIC_CPU_OFFSET     (TISSOT_GIC_DIST_OFFSET + 0x2000)               /* 0x03802000 */
++#define TISSOT_GIC_CPU_SIZE       0x2000
++
++/* ---- GICD (distributor) register offsets ---- */
++#define TISSOT_GICD_CTLR          0x0000
++#define TISSOT_GICD_TYPER         0x0004
++#define TISSOT_GICD_IIDR          0x0008
++#define TISSOT_GICD_IGROUPR       0x0080  /* +4 per 32 IRQs */
++#define TISSOT_GICD_ISENABLER     0x0100  /* +4 per 32 IRQs */
++#define TISSOT_GICD_ICENABLER     0x0180  /* +4 per 32 IRQs */
++#define TISSOT_GICD_ISPENDR       0x0200  /* +4 per 32 IRQs */
++#define TISSOT_GICD_ICPENDR       0x0280  /* +4 per 32 IRQs */
++#define TISSOT_GICD_IPRIORITYR    0x0400  /* +1 per IRQ */
++#define TISSOT_GICD_ITARGETSR     0x0800  /* +1 per IRQ (banked for PPI) */
++#define TISSOT_GICD_ICFGR         0x0C00  /* +4 per 16 IRQs */
++#define TISSOT_GICD_SGIR          0x0F00
++
++/* ---- GICC (CPU interface) register offsets ---- */
++#define TISSOT_GICC_CTLR          0x0000
++#define TISSOT_GICC_PMR           0x0004
++#define TISSOT_GICC_BPR           0x0008
++#define TISSOT_GICC_IAR           0x000C
++#define TISSOT_GICC_EOIR          0x0010
++#define TISSOT_GICC_RPR           0x0014
++#define TISSOT_GICC_HPPIR         0x0018
++#define TISSOT_GICC_IIDR          0x00FC
++
++/* GICD_CTLR bits */
++#define TISSOT_GICD_CTLR_ENABLE_GRP0  0x1
++
++/* GICC_CTLR bits */
++#define TISSOT_GICC_CTLR_ENABLE_GRP0  0x1
++
++/* GICv2 spurious interrupt ID returned by GICC_IAR when nothing is pending */
++#define TISSOT_GIC_SPURIOUS_IRQ   1023
++
++/* Highest SPI on GIC-400 is 987; round the scan up to 1024 for alignment */
++#define TISSOT_GIC_MAX_IRQ        1024
++
++/* Default priority: mid-range, above nothing in particular. Apple uses 0xA0. */
++#define TISSOT_GIC_DEFAULT_PRIO   0xA0
++
++/*
++ * ARM generic timer PPIs (GICv2 INTIDs 16..31):
++ *   26 = PPI 10 -> non-secure physical timer  (CNTP_*)
++ *   27 = PPI 11 -> secure physical timer      (CNTPS_*)
++ *   28 = PPI 12 -> virtual timer              (CNTV_*)
++ *   29 = PPI 13 -> hypervisor timer           (CNTHP_*)
++ *
++ * XNU's ARM_ARCH_TIMER code drives the non-secure physical timer, so 26 is
++ * the one that must fire. 27 is enabled as well because Qualcomm's
++ * bootloader may leave the secure timer armed; leaving it masked would
++ * produce a permanent interrupt storm instead of a clean boot.
++ */
++#define TISSOT_IRQ_TIMER_NS       26
++#define TISSOT_IRQ_TIMER_S        27
++
+ #define TISSOT_BREAK              asm volatile("brk #0");
+ 
+ #define TISSOT_PUT32(addr, value) do { *((volatile uint32_t *)(addr)) = (value); } while (0)
+@@ -75,6 +158,16 @@
+ #define PLATFORM_PANIC_LOG_PADDR  0x9FF00000ULL
+ #define PLATFORM_PANIC_LOG_SIZE   16384
+ 
++/* ---- GICv2 ack/EOI helpers (implemented in pexpert/arm/pe_fiq.c) ----
++ *
++ * osfmk/arm64/sleh.c cannot reach GIC MMIO on its own: it only knows the
++ * GICv3 system-register interface (ICC_IAR0_EL1 / ICC_EOIR0_EL1). These two
++ * calls give it a GICv2 path without duplicating the register plumbing.
++ *
++ * The prototypes live in <pexpert/arm/protos.h> because that is the header
++ * sleh.c already includes.
++ */
++
+ #endif /* ! ASSEMBLER */
+ 
+ #endif /* ! _PEXPERT_ARM_TISSOT_H */
+--- a/pexpert/pexpert/arm/protos.h
++++ b/pexpert/pexpert/arm/protos.h
+@@ -51,6 +51,23 @@
+ void serial_go_to_sleep(void);
+ #endif /* PRIVATE */
+ 
++/*
++ * GICv2 (ARM GIC-400) interrupt ack/EOI.
++ *
++ * Implemented in pexpert/arm/pe_fiq.c for ARM64_BOARD_CONFIG_TISSOT.
++ * osfmk/arm64/sleh.c needs these because its IRQ path is otherwise written
++ * against the GICv3 system-register interface (ICC_IAR0_EL1 /
++ * ICC_EOIR0_EL1), which does not exist on GICv2 hardware.
++ *
++ * Declared here rather than in TISSOT.h because sleh.c already includes
++ * <pexpert/arm/protos.h>, so no new include (and no implicit-declaration
++ * error) is introduced on the osfmk side.
++ */
++#if defined(ARM64_BOARD_CONFIG_TISSOT)
++uint32_t pe_gic_ack_irq(void);
++void pe_gic_eoi_irq(uint32_t iar);
++#endif
++
+ int switch_to_serial_console(void);
+ void switch_to_old_console(int);
+ 
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -173,6 +173,278 @@
+ 	__builtin_arm_wsr64("ICC_IGRPEN0_EL1", 1);
+ 	__builtin_arm_isb(ISB_SY);
+ }
++#elif defined(ARM64_BOARD_CONFIG_TISSOT)
++/* ==========================================================================
++ * GIC-400 (GICv2) driver — Xiaomi Mi A1 (MSM8953)
++ * ==========================================================================
++ *
++ * Why this exists
++ * ---------------
++ * XNU ships exactly two interrupt-controller paths:
++ *
++ *   1. Apple AIC  — proprietary, only on Apple SoCs (pexpert/pexpert/arm64/AIC.h)
++ *   2. GICv3      — system-register interface, guarded by HAS_GIC_V3 and only
++ *                   enabled by VMAPPLE.h (Apple's macOS VM platform)
++ *
++ * MSM8953 has an ARM GIC-400, which is GICv2: the CPU interface is MMIO
++ * (GICC_IAR / GICC_EOIR), not the ICC_*_EL1 system registers. Neither
++ * existing path works, so without this driver pe_init_fiq() would be an
++ * empty function and the kernel would never take a timer interrupt — it
++ * would print a few lines to UART and then hang forever with IRQs masked.
++ *
++ * What this does
++ * --------------
++ * On the boot processor: disables the distributor, puts every SPI in group 0
++ * with a uniform priority and targets them at CPU 0, then enables the
++ * distributor. On every CPU (including the boot one): programs its private
++ * CPU interface and enables the ARM generic-timer PPIs.
++ *
++ * Group 0 vs group 1
++ * ------------------
++ * Group 0 is the FIQ group and is normally secure-only. Android boots the
++ * non-secure world, so on real hardware the non-secure alias of GICD_IGROUPR
++ * may read back as "group 1" no matter what we write, and GICC_CTLR bit 0
++ * (EnableGrp0) may be RAZ/WI. If that turns out to be the case on the device,
++ * the fix is to switch this driver to group 1 / IRQ (see the TISSOT_GIC_GROUP1
++ * note below) and route through ICC_* — which is exactly what
++ * docs/XNU8020-PORT-PLAN.md flags as the first thing to check on hardware.
++ *
++ * This code has NOT been run on hardware. Every register offset comes from
++ * the ARM GICv2 architecture specification and the mainline Linux
++ * msm-qgic2 binding.
++ */
++
++#ifndef TISSOT_GIC_GROUP1
++#define TISSOT_GIC_GROUP1 0
++#endif
++
++static vm_offset_t gicd_base;
++static vm_offset_t gicc_base;
++
++static uint32_t
++tissot_gicd_read32(uint32_t offset)
++{
++	return *((volatile uint32_t *)(gicd_base + offset));
++}
++
++static void
++tissot_gicd_write32(uint32_t offset, uint32_t value)
++{
++	*((volatile uint32_t *)(gicd_base + offset)) = value;
++}
++
++static uint32_t
++tissot_gicc_read32(uint32_t offset)
++{
++	return *((volatile uint32_t *)(gicc_base + offset));
++}
++
++static void
++tissot_gicc_write32(uint32_t offset, uint32_t value)
++{
++	*((volatile uint32_t *)(gicc_base + offset)) = value;
++}
++
++/*
++ * Number of 32-IRQ banks the distributor actually implements, taken from
++ * GICD_TYPER[4:0] ("ITLinesNumber"). GIC-400 on MSM8953 reports 0x1F for
++ * 1024 IRQs, but reading it keeps the loops honest on any part.
++ */
++static uint32_t
++tissot_gic_num_banks(void)
++{
++	uint32_t typer = tissot_gicd_read32(TISSOT_GICD_TYPER);
++	uint32_t banks = (typer & 0x1F) + 1;
++
++	if (banks > (TISSOT_GIC_MAX_IRQ / 32)) {
++		banks = TISSOT_GIC_MAX_IRQ / 32;
++	}
++	return banks;
++}
++
++/* Distributor-wide setup. Boot processor only. */
++static void
++tissot_gic_init_distributor(void)
++{
++	uint32_t banks = tissot_gic_num_banks();
++	uint32_t i;
++
++	/* Quiesce the distributor before touching any configuration register. */
++	tissot_gicd_write32(TISSOT_GICD_CTLR, 0);
++
++	/*
++	 * Group + enable + pending state for every bank.
++	 *
++	 * Banks 0 covers INTIDs 0..31 (SGIs and PPIs). Those are banked
++	 * per-CPU, so the boot processor can only configure its own copy —
++	 * secondary CPUs redo bank 0 in tissot_gic_init_cpu_interface().
++	 */
++	for (i = 0; i < banks; i++) {
++		uint32_t off = i * 4;
++
++		/*
++		 * IGROUPR bit = 1 means group 1, bit = 0 means group 0.
++		 *
++		 * Group 0 build: every bit 0.
++		 * To switch this driver to group 1 / IRQ instead, write
++		 * 0xFFFFFFFFu here and change GICC_CTLR below to bit 1
++		 * (EnableGrp1). Do that only if the device turns out to expose
++		 * group 0 as secure-only; see the "Group 0 vs group 1" note at
++		 * the top of this block.
++		 */
++		tissot_gicd_write32(TISSOT_GICD_IGROUPR + off,
++		    TISSOT_GIC_GROUP1 ? 0xFFFFFFFFu : 0);
++		tissot_gicd_write32(TISSOT_GICD_ICENABLER + off, 0xFFFFFFFFu);
++		tissot_gicd_write32(TISSOT_GICD_ICPENDR + off, 0xFFFFFFFFu);
++	}
++
++	/* Uniform priority for every INTID (byte-wide, so 1024 bytes). */
++	for (i = 0; i < TISSOT_GIC_MAX_IRQ; i += 4) {
++		tissot_gicd_write32(TISSOT_GICD_IPRIORITYR + i,
++		    TISSOT_GIC_DEFAULT_PRIO * 0x01010101u);
++	}
++
++	/* Target every SPI at CPU 0; PPI/SGI targets are banked and ignored. */
++	for (i = 32; i < TISSOT_GIC_MAX_IRQ; i += 4) {
++		tissot_gicd_write32(TISSOT_GICD_ITARGETSR + i, 0x01010101u);
++	}
++
++	/*
++	 * Every SPI level-triggered (ICFGR bit = 0). Edge-triggered is only
++	 * correct for a handful of GPIO lines we do not drive yet.
++	 */
++	for (i = 32; i < TISSOT_GIC_MAX_IRQ; i += 16) {
++		tissot_gicd_write32(TISSOT_GICD_ICFGR + (i / 16) * 4, 0);
++	}
++
++	tissot_gicd_write32(TISSOT_GICD_CTLR, TISSOT_GICD_CTLR_ENABLE_GRP0);
++}
++
++/* Per-CPU setup: CPU interface + private PPIs. */
++static void
++tissot_gic_init_cpu_interface(void)
++{
++	/*
++	 * Bank 0 (INTIDs 0..31) holds the SGIs and PPIs. ICFGR for PPIs is
++	 * 2 bits per interrupt starting at 0x0C04; 0b10 = level-triggered for
++	 * the generic-timer PPIs, which is what the ARM architecture requires.
++	 */
++	uint32_t icfgr = tissot_gicd_read32(TISSOT_GICD_ICFGR + 4);
++
++	icfgr |= (2u << ((TISSOT_IRQ_TIMER_NS % 16) * 2));
++	icfgr |= (2u << ((TISSOT_IRQ_TIMER_S % 16) * 2));
++	tissot_gicd_write32(TISSOT_GICD_ICFGR + 4, icfgr);
++
++	/* Priority for the timer PPIs (byte-wide registers). */
++	tissot_gicd_write32(TISSOT_GICD_IPRIORITYR + (TISSOT_IRQ_TIMER_NS & ~3u),
++	    TISSOT_GIC_DEFAULT_PRIO * 0x01010101u);
++
++	/* Enable the generic-timer PPIs on this CPU. */
++	tissot_gicd_write32(TISSOT_GICD_ISENABLER, (1u << TISSOT_IRQ_TIMER_NS) |
++	    (1u << TISSOT_IRQ_TIMER_S));
++
++	/* Clear any stale pending state on them. */
++	tissot_gicd_write32(TISSOT_GICD_ICPENDR, (1u << TISSOT_IRQ_TIMER_NS) |
++	    (1u << TISSOT_IRQ_TIMER_S));
++
++	/* CPU interface: disabled -> programmed -> enabled. */
++	tissot_gicc_write32(TISSOT_GICC_CTLR, 0);
++
++	/* Accept every priority (lowest priority mask). */
++	tissot_gicc_write32(TISSOT_GICC_PMR, 0xFF);
++
++	/* No preemption: BPR 0 keeps a single priority group. */
++	tissot_gicc_write32(TISSOT_GICC_BPR, 0);
++
++	tissot_gicc_write32(TISSOT_GICC_CTLR, TISSOT_GICC_CTLR_ENABLE_GRP0);
++}
++
++void
++pe_init_fiq()
++{
++	DTEntry entry;
++	void const *prop;
++	unsigned int prop_size;
++	vm_offset_t soc_base_phys;
++	uint64_t gicd_off, gicd_size, gicc_off, gicc_size;
++	int error;
++
++	/*
++	 * Only the boot processor sets up the distributor. Secondary CPUs see
++	 * gicd_base already non-zero and jump straight to their private
++	 * interface, which also avoids the non-thread-safe SecureDT* routines
++	 * racing between cores (same reasoning as the GICv3 path above).
++	 */
++	if (!gicd_base) {
++		error = SecureDTLookupEntry(NULL, "/arm-io/gic", &entry);
++		if (error != kSuccess) {
++			panic("%s: cannot find /arm-io/gic node in device tree",
++			    __func__);
++		}
++
++		error = SecureDTGetProperty(entry, "reg", &prop, &prop_size);
++		if (error != kSuccess) {
++			panic("%s: cannot find GIC MMIO regions in device tree",
++			    __func__);
++		}
++
++		/* GICv2 reg = <GICD base, GICD size, GICC base, GICC size> */
++		if (prop_size < 4 * sizeof(uint64_t)) {
++			panic("%s: GIC reg property is %u bytes, expected 32",
++			    __func__, prop_size);
++		}
++
++		soc_base_phys = pe_arm_get_soc_base_phys();
++		if (soc_base_phys == 0) {
++			panic("%s: arm-io soc base is 0; device tree is broken",
++			    __func__);
++		}
++
++		gicd_off = ((uint64_t const *)prop)[0];
++		gicd_size = ((uint64_t const *)prop)[1];
++		gicc_off = ((uint64_t const *)prop)[2];
++		gicc_size = ((uint64_t const *)prop)[3];
++
++		gicd_base = ml_io_map(soc_base_phys + gicd_off, gicd_size);
++		if (!gicd_base) {
++			panic("%s: cannot map GIC distributor at 0x%llx",
++			    __func__, (unsigned long long)(soc_base_phys + gicd_off));
++		}
++
++		gicc_base = ml_io_map(soc_base_phys + gicc_off, gicc_size);
++		if (!gicc_base) {
++			panic("%s: cannot map GIC CPU interface at 0x%llx",
++			    __func__, (unsigned long long)(soc_base_phys + gicc_off));
++		}
++
++		tissot_gic_init_distributor();
++	}
++
++	tissot_gic_init_cpu_interface();
++}
++
++/*
++ * Acknowledge and complete an interrupt.
++ *
++ * sleh_irq() calls these from osfmk/arm64/sleh.c in place of the GICv3
++ * ICC_IAR0_EL1 / ICC_EOIR0_EL1 accesses it uses on Apple platforms.
++ */
++uint32_t
++pe_gic_ack_irq(void)
++{
++	return tissot_gicc_read32(TISSOT_GICC_IAR);
++}
++
++void
++pe_gic_eoi_irq(uint32_t iar)
++{
++	if (iar == TISSOT_GIC_SPURIOUS_IRQ) {
++		return;
++	}
++
++	tissot_gicc_write32(TISSOT_GICC_EOIR, iar);
++}
++
+ #else
+ void
+ pe_init_fiq()
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1900,6 +1900,13 @@
+ 
+ #if APPLEVIRTUALPLATFORM
+ 	uint64_t iar = __builtin_arm_rsr64("ICC_IAR0_EL1");
++#elif defined(ARM64_BOARD_CONFIG_TISSOT)
++	/*
++	 * MSM8953 uses a GIC-400 (GICv2): the CPU interface is MMIO, so the
++	 * ICC_IAR0_EL1 / ICC_EOIR0_EL1 system registers used above do not
++	 * exist on this hardware. pe_gic_ack_irq() reads GICC_IAR instead.
++	 */
++	uint32_t iar = pe_gic_ack_irq();
+ #endif
+ 
+ #if defined(HAS_IPI)
+@@ -1949,6 +1956,9 @@
+ 		__builtin_arm_wsr64("ICC_EOIR0_EL1", iar);
+ 		__builtin_arm_isb(ISB_SY);
+ 	}
++#elif defined(ARM64_BOARD_CONFIG_TISSOT)
++	/* GICv2 completion goes through MMIO (GICC_EOIR); see pe_fiq.c. */
++	pe_gic_eoi_irq(iar);
+ #endif
+ 
+ 	sleh_interrupt_handler_epilogue();

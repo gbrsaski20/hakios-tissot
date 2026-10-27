@@ -121,6 +121,11 @@ need_grep "pexpert/pexpert/arm64/board_config.h" "ARM64_BOARD_CONFIG_TISSOT"
 # patch 0002
 need_grep "pexpert/pexpert/arm/protos.h" "SERIAL_TISSOT_UART"
 need_grep "pexpert/arm/pe_serial.c" "tissot_uart_init"
+# patch 0003 (GICv2)
+need_grep "pexpert/pexpert/arm64/TISSOT.h" "TISSOT_GIC_V2"
+need_grep "pexpert/arm/pe_fiq.c" "tissot_gic_init_distributor"
+need_grep "pexpert/arm/pe_fiq.c" "pe_gic_ack_irq"
+need_grep "osfmk/arm64/sleh.c" "pe_gic_ack_irq"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

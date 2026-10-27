@@ -73,6 +73,22 @@ TISSOT_SOC_SIZE = 0x10000000
 TISSOT_UART_OFFSET = 0x000AF000     # 0x078AF000 - 0x07800000
 TISSOT_UART_SIZE = 0x200
 
+# GIC-400 (GICv2): distributor 0x0B000000, CPU interface 0x0B002000
+TISSOT_GICD_OFFSET = 0x0B000000 - TISSOT_SOC_PARENT   # 0x03800000
+TISSOT_GICD_SIZE = 0x1000
+TISSOT_GICC_OFFSET = 0x0B002000 - TISSOT_SOC_PARENT   # 0x03802000
+TISSOT_GICC_SIZE = 0x2000
+
+# ARM generic timer PPIs
+TISSOT_IRQ_TIMER_NS = 26
+TISSOT_IRQ_TIMER_S = 27
+
+# Clock tree (mainline qcom/msm8953.dtsi + stock tissot DT)
+TISSOT_TIMEBASE_HZ = 19200000       # CNTFRQ_EL0 = 19.2 MHz
+TISSOT_CPU_HZ = 2016000000          # Cortex-A53 max on MSM8953
+TISSOT_BUS_HZ = 19200000
+TISSOT_MEM_HZ = 1333000000
+
 # DRAM base/size for Mi A1 (4 GiB window; usable is less, XNU trims it)
 TISSOT_DRAM_BASE = 0x80000000
 TISSOT_DRAM_SIZE = 0x100000000
@@ -219,6 +235,15 @@ def apply_tissot(root):
     """Override the iPhone X ADT with the minimum MSM8953 needs.
 
     Identity stays iPhone X (d22ap) on purpose: MobileGestalt depends on it.
+
+    Every node written here is consumed by a specific line of XNU 8020:
+
+      /arm-io:ranges            pe_arm_get_soc_base_phys()   -> soc base
+      /arm-io/serial:reg        serial_init()                -> UART console
+      /arm-io/gic:reg           pe_init_fiq() (GICv2 driver) -> interrupts
+      /arm-io/gic-timebase:reg  pe_arm_map_interrupt_controller()
+      /cpus/cpuN:*frequency*    pe_identify_machine()        -> clock info
+      /memory:reg               arm_vm_init()                -> DRAM
     """
     changes = []
 
@@ -251,6 +276,73 @@ def apply_tissot(root):
                    f"0x{TISSOT_UART_SIZE:x}}} -> phys 0x"
                    f"{TISSOT_SOC_PARENT + TISSOT_UART_OFFSET:x}")
 
+    # ---- interrupt controller: replace Apple AIC with GIC-400 (GICv2) ----
+    #
+    # The iPhone X ADT ships /arm-io/aic with interrupt-controller = "master".
+    # pe_arm_map_interrupt_controller() does
+    #     SecureDTFindEntry("interrupt-controller", "master", &entryP)
+    # which is a first-match search, so the AIC node MUST go — otherwise XNU
+    # maps Apple's AIC registers (0x32100000) instead of our GIC.
+    armio.kids = [k for k in armio.kids if k.name() not in ("aic", "gic")]
+
+    gic = Node()
+    gic.set("name", b"gic\x00")
+    gic.set("compatible", b"arm,gic-400\x00arm,cortex-a15-gic\x00")
+    gic.set("device_type", b"interrupt-controller\x00")
+    gic.set("interrupt-controller", b"master\x00")
+    gic.set("#interrupt-cells", struct.pack("<I", 3))
+    # GICv2 reg = <GICD base, GICD size, GICC base, GICC size>
+    gic.set("reg", struct.pack("<4Q", TISSOT_GICD_OFFSET, TISSOT_GICD_SIZE,
+                               TISSOT_GICC_OFFSET, TISSOT_GICC_SIZE))
+    gic.set("AAPL,phandle", struct.pack("<I", 0x101))
+    armio.add_child(gic)
+    changes.append(f"/arm-io/aic -> /arm-io/gic (GICv2): GICD 0x"
+                   f"{TISSOT_SOC_PARENT + TISSOT_GICD_OFFSET:x}, GICC 0x"
+                   f"{TISSOT_SOC_PARENT + TISSOT_GICC_OFFSET:x}")
+
+    # ---- timer node -----------------------------------------------------
+    #
+    # pe_arm_map_interrupt_controller() bails out (returns 0, aborting early
+    # boot) if no node carries device_type = "timer". On arm64 the base it
+    # maps is never actually dereferenced — ARM_ARCH_TIMER reads CNTFRQ_EL0 /
+    # CNTPCT_EL0 — but the region still has to be mappable, so point it at
+    # the GIC distributor rather than Apple's AIC timebase at 0x32108000.
+    armio.kids = [k for k in armio.kids if k.name() not in ("aic-timebase", "gic-timebase")]
+
+    tmr = Node()
+    tmr.set("name", b"gic-timebase\x00")
+    tmr.set("compatible", b"arm,armv8-timer\x00")
+    tmr.set("device_type", b"timer\x00")
+    tmr.set("reg", struct.pack("<2Q", TISSOT_GICD_OFFSET, TISSOT_GICD_SIZE))
+    tmr.set("clock-frequency", struct.pack("<Q", TISSOT_TIMEBASE_HZ))
+    tmr.set("AAPL,phandle", struct.pack("<I", 0x102))
+    armio.add_child(tmr)
+    changes.append(f"/arm-io/aic-timebase -> /arm-io/gic-timebase "
+                   f"(device_type=timer, {TISSOT_TIMEBASE_HZ // 1000000} MHz)")
+
+    # ---- cpus: real MSM8953 clock tree ----------------------------------
+    #
+    # The iPhone X ADT has state="running" (good — pe_identify_machine skips
+    # CPUs without it) but every *frequency property is 0. A zero
+    # timebase-frequency makes dec_clock_rate_hz 0, which then divides by
+    # zero when computing bus_to_dec_rate_den. So these MUST be filled in.
+    cpus = root.child("cpus")
+    n_cpus = 0
+    if cpus is not None:
+        for cpu in cpus.kids:
+            if cpu.get("state") is None:
+                continue
+            cpu.set("timebase-frequency", struct.pack("<Q", TISSOT_TIMEBASE_HZ))
+            cpu.set("bus-frequency", struct.pack("<Q", TISSOT_BUS_HZ))
+            cpu.set("memory-frequency", struct.pack("<Q", TISSOT_MEM_HZ))
+            cpu.set("peripheral-frequency", struct.pack("<Q", TISSOT_BUS_HZ))
+            cpu.set("fixed-frequency", struct.pack("<Q", TISSOT_TIMEBASE_HZ))
+            cpu.set("clock-frequency", struct.pack("<Q", TISSOT_CPU_HZ))
+            n_cpus += 1
+        changes.append(f"/cpus: {n_cpus} cpu(s) -> timebase "
+                       f"{TISSOT_TIMEBASE_HZ // 1000000} MHz, cpu "
+                       f"{TISSOT_CPU_HZ // 1000000} MHz")
+
     # ---- memory: Mi A1 DRAM ---------------------------------------------
     mem = root.child("memory")
     if mem is not None:
@@ -263,6 +355,80 @@ def apply_tissot(root):
     changes.append("root:hakios,target = tissot")
 
     return changes
+
+
+# ---------------------------------------------------------------------------
+# verify: the nodes XNU actually reads must all be present and sane
+# ---------------------------------------------------------------------------
+def verify_xnu_requirements(root):
+    """Check every ADT dependency XNU 8020 has, and report pass/fail.
+
+    Each entry maps to a real call site, so a failure here means the kernel
+    would panic or silently lose a subsystem.
+    """
+    checks = []
+
+    def add(ok, what, detail=""):
+        checks.append((ok, what, detail))
+
+    # pe_arm_get_soc_base_phys() -> serial_init() early-returns when 0
+    armio = root.child("arm-io")
+    add(armio is not None, "/arm-io exists", "")
+    if armio is not None:
+        rng = armio.get("ranges")
+        ok = rng is not None and len(rng) >= 16
+        parent = struct.unpack("<2Q", rng[:16])[1] if ok else 0
+        add(ok and parent != 0, "/arm-io:ranges parent != 0",
+            f"parent=0x{parent:x}")
+
+        ser = armio.child("serial")
+        add(ser is not None, "/arm-io/serial exists",
+            "" if ser is None else f"reg=0x{struct.unpack('<2Q', ser.get('reg'))[0]:x}")
+
+        gic = armio.child("gic")
+        add(gic is not None, "/arm-io/gic exists", "")
+        if gic is not None:
+            reg = gic.get("reg")
+            add(reg is not None and len(reg) == 32,
+                "/arm-io/gic:reg is 4x u64 (GICv2)",
+                "" if reg is None else f"{len(reg)}B")
+            ic = gic.get("interrupt-controller")
+            add(ic is not None and ic.startswith(b"master"),
+                "/arm-io/gic interrupt-controller=master",
+                "" if ic is None else ic.rstrip(b"\x00").decode("ascii", "replace"))
+
+        # exactly one node may claim interrupt-controller=master
+        claimants = [k.name() for k in armio.kids
+                     if (k.get("interrupt-controller") or b"").startswith(b"master")]
+        add(len(claimants) == 1, "exactly one interrupt-controller=master",
+            ", ".join(claimants) or "none")
+
+        timers = [k.name() for k in armio.kids
+                  if (k.get("device_type") or b"").startswith(b"timer")]
+        add(len(timers) >= 1, "a node with device_type=timer",
+            ", ".join(timers) or "none")
+
+    # pe_identify_machine() asserts /cpus exists, then reads frequencies
+    cpus = root.child("cpus")
+    add(cpus is not None, "/cpus exists (pe_identify_machine asserts)", "")
+    if cpus is not None:
+        running = [c for c in cpus.kids
+                   if (c.get("state") or b"").startswith(b"running")]
+        add(len(running) > 0, "/cpus has state=running cpu(s)", f"{len(running)}")
+        zero = [c.name() for c in running
+                if struct.unpack("<Q", c.get("timebase-frequency") or b"\0" * 8)[0] == 0]
+        add(not zero, "no cpu has timebase-frequency=0",
+            ("zero: " + ", ".join(zero)) if zero else
+            (f"{struct.unpack('<Q', running[0].get('timebase-frequency'))[0] // 1000000} MHz"
+             if running else ""))
+
+    mem = root.child("memory")
+    add(mem is not None and len(mem.get("reg") or b"") == 16,
+        "/memory:reg is 2x u64",
+        "" if mem is None or not mem.get("reg") else
+        f"0x{struct.unpack('<2Q', mem.get('reg'))[0]:x}")
+
+    return checks
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +538,22 @@ def main(argv=None):
         print(f"         -> serial_init would map 0x{rng[1] + reg[0]:x} "
               f"(expected 0x{TISSOT_SOC_PARENT + TISSOT_UART_OFFSET:x})")
     print()
+
+    # ---- XNU requirement audit -------------------------------------------
+    checks = verify_xnu_requirements(reparsed)
+    failed = [c for c in checks if not c[0]]
+    print(f"  XNU 8020 requirement audit ({len(checks) - len(failed)}/"
+          f"{len(checks)} pass):")
+    for ok, what, detail in checks:
+        mark = "OK  " if ok else "FAIL"
+        suffix = f"  [{detail}]" if detail else ""
+        print(f"    {mark} {what}{suffix}")
+    print()
+
+    if failed:
+        print(f"  ERROR: {len(failed)} requirement(s) unmet — XNU would not boot")
+        return 1
+
     return 0
 
 

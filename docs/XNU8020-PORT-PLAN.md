@@ -19,10 +19,13 @@ Apple (hanya ada 3 tag: `.101.4`, `.121.3`, `.140.41`).
 | Script fetch + apply                  | ✅ `xnu/apply-8020.sh`                  |
 | Script build + cek toolchain          | ✅ `xnu-build-arm64.sh` (+ `--force`)   |
 | Patch 0002 — driver UART console      | ✅ **draft**, apply teruji (compile TBD)|
+| Patch 0003 — **driver GICv2 (GIC-400)** | ✅ **draft**, apply teruji (compile TBD)|
 | **Build kernel sungguhan**            | ❌ butuh macOS + cctools + SDK          |
 | UART benar-benar keluar log           | ❌ butuh hardware                      |
+| Interrupt/timer benar-benar jalan     | ❌ butuh hardware                      |
 | `mkadt.py` (Apple Device Tree)        | ✅ round-trip byte-identik, preset ok   |
-| Platform identify / ADT               | ⚠️ ADT siap, integrasi XNU belum        |
+| ADT memuat **GIC + timer + frekuensi** | ✅ 12/12 audit lulus (`--tissot`)       |
+| Platform identify / ADT               | ✅ ADT lengkap untuk semua call-site XNU|
 | SHIM + mkpayload                      | ❌ belum                                |
 
 ---
@@ -143,6 +146,62 @@ Konsekuensinya untuk tissot: `ranges` harus punya parent **bukan nol**.
 `mkadt.py` memakai `ranges = {0, 0x07800000, 0x10000000}` dan `serial.reg =
 {0xAF000, 0x200}` → `0x07800000 + 0xAF000 = 0x78AF000` (UART console asli).
 
+### 2.9 XNU tidak punya driver GICv2 — ini blocker nomor dua
+
+Ini temuan yang paling menentukan bentuk patch 0003. XNU 8020 hanya punya
+**dua** jalur interrupt controller:
+
+| Jalur | Di mana | Untuk siapa |
+|-------|---------|-------------|
+| **Apple AIC** | `pexpert/pexpert/arm64/AIC.h`, dipakai `pe_arm_init_timer()` | SoC Apple |
+| **GICv3** | `pexpert/arm/pe_fiq.c` blok `#if HAS_GIC_V3` | **hanya** VMAPPLE (`HAS_GIC_V3` cuma didefinisikan di `VMAPPLE.h`) |
+
+MSM8953 memakai **GIC-400 = GICv2**, dan untuk build non-GICv3
+`pe_init_fiq()` di source asli **kosong total**:
+
+```c
+#else
+void
+pe_init_fiq()
+{
+}
+#endif
+```
+
+Artinya tanpa patch, kernel tissot: keluar beberapa baris ke UART → lalu
+**hang selamanya** karena tidak pernah menerima interrupt timer. Scheduler
+tidak pernah tick, `rtclock` tidak pernah maju.
+
+Selain itu `sleh_irq()` di `osfmk/arm64/sleh.c:1902,1949` memakai
+**system register GICv3** (`ICC_IAR0_EL1` / `ICC_EOIR0_EL1`) — dan itu pun
+di dalam `#if APPLEVIRTUALPLATFORM`. GICv2 memakai **MMIO**
+(`GICC_IAR` / `GICC_EOIR`), jadi jalur ack/EOI juga harus ditambah.
+
+→ Patch 0003 menambahkan driver GICv2 penuh + jalur ack/EOI MMIO.
+
+### 2.10 `/cpus` di ADT iPhone X: `state=running` tapi semua frekuensi 0
+
+`pe_identify_machine()` melewati CPU yang `state`-nya bukan `running`, lalu
+membaca `timebase-frequency`, `bus-frequency`, `clock-frequency`, dst.
+
+ADT d22ap asli:
+
+```
+cpu0  state=running   timebase-frequency=0  clock-frequency=0  ...
+cpu1..5 state=waiting
+```
+
+Dua hal penting:
+
+1. **Semua frekuensi 0.** `timebase_frequency_hz = 0` → `dec_clock_rate_hz = 0`
+   → `bus_to_dec_rate_den = bus_clock_rate_hz / 0` = **bagi nol** di
+   `pe_identify_machine.c:177`. Jadi frekuensi **wajib** diisi (19,2 MHz untuk
+   MSM8953).
+2. **Hanya cpu0 `running`.** Ini justru **menguntungkan**: XNU hanya akan
+   membawa CPU 0. Bring-up single-core adalah target pertama yang benar, dan
+   MSM8953 memang butuh PSCI/spin-table untuk core kedua yang belum kita
+   implementasikan. Tidak perlu diubah dulu.
+
 ---
 
 ## 3. Patch 0001 — apa isinya
@@ -194,22 +253,48 @@ direktori bersih; kelima file hasilnya **byte-identik** dengan tree kerja.
   Keduanya bergantung pada `mkadt.py` yang **belum ada**.
 - Offset register mengikuti `msm_serial_hs.c`; wajib diverifikasi di hardware.
 
-### Patch 0003 — `pe_identify_machine.c` untuk TISSOT
+### Patch 0003 — driver GICv2 (GIC-400) ✅ (draft, sudah ditulis)
 
-Tanpa Apple's `machine_info`/ADT yang sesuai, XNU akan gagal mengidentifikasi  
-platform. Ini bagian yang paling banyak "trial and error".
+`xnu/patches-8020/0003-tissot-gicv2-interrupts.patch` — 451 baris, 7 hunk,
+4 file:
 
-### Patch 0004 — load address
+| File | Perubahan |
+|------|-----------|
+| `pexpert/pexpert/arm64/TISSOT.h` | `TISSOT_GIC_V2`, alamat GICD/GICC, offset register GICD/GICC lengkap, bit `CTLR`, INTID timer PPI 26/27, prioritas default |
+| `pexpert/pexpert/arm/protos.h` | prototipe `pe_gic_ack_irq()` / `pe_gic_eoi_irq()` (di sini karena `sleh.c` sudah meng-include header ini) |
+| `pexpert/arm/pe_fiq.c` | blok `#elif defined(ARM64_BOARD_CONFIG_TISSOT)` — driver penuh: map GICD+GICC dari ADT, inisialisasi distributor (group, prioritas, target, level-trigger), inisialisasi CPU interface per-core, aktifkan PPI timer |
+| `osfmk/arm64/sleh.c` | cabang `#elif … TISSOT` di dua tempat: `GICC_IAR` untuk ack, `GICC_EOIR` untuk EOI (menggantikan `ICC_*_EL1` yang tidak ada di GICv2) |
 
-`ARM64_LINK_ADDR` harus cocok dengan tempat bootloader menaruh kernel  
-(`0x80008000` untuk tissot, dari `BOARD_KERNEL_BASE 0x80000000` + offset).
+**Verifikasi yang dilakukan:** komposisi `pristine → 0001 → 0002 → 0003`
+diuji di direktori bersih; **ketujuh** file hasilnya byte-identik dengan tree
+kerja. Kurung `{}`/`()` di `pe_fiq.c`, `TISSOT.h`, `protos.h` seimbang
+(`sleh.c` punya selisih 1 kurung yang **sudah ada di source Apple asli** —
+929/928 → 936/935, patch menambah 7 pasang).
+
+**Batasan draft ini:**
+- Belum pernah dikompilasi (tidak ada clang/cctools di sini).
+- **Group 0 vs group 1**: group 0 adalah grup FIQ dan normalnya secure-only.
+  Android boot di non-secure world, jadi di hardware asli tulis ke
+  `GICD_IGROUPR` bisa read-back sebagai group 1 dan `GICC_CTLR` bit 0 bisa
+  RAZ/WI. Kalau itu terjadi, ubah `TISSOT_GIC_GROUP1` → 1 di `pe_fiq.c`
+  (dan `GICC_CTLR` ke bit 1). **Ini hal pertama yang harus dicek di HP.**
+- Offset register mengikuti spesifikasi ARM GICv2 + binding Linux
+  `msm-qgic2`; wajib diverifikasi di hardware.
+
+### Patch 0004 — load address / SHIM
+
+`ARM64_LINK_ADDR` di `MakeInc.def` adalah **alamat virtual** high-half
+(`0xfffffff007004000`), sama untuk semua target ARM64 XNU — jadi **tidak**
+perlu diubah. Yang perlu dibuat adalah **SHIM**: kode bare-metal yang
+menerima kendali dari ABL, menyiapkan page table, memetakan image kernel
+fisik (`0x80008000`) ke alamat virtual itu, lalu melompat ke `_start`.
 
 ### Belum tersentuh sama sekali
 
-- `mkadt.py` (Apple Device Tree untuk MSM8953)
-- `mkpayload.py` (kernel + ADT + boot-args → payload)
-- `shim/` (bare-metal C+asm antara ABL dan XNU)
+- `mkpayload.py` (kernel + ADT + boot-args → payload SHIM)
+- `shim/` (bare-metal C+asm antara ABL dan XNU) ← **pekerjaan terbesar berikutnya**
 - `mkiosroot.sh` (root iOS 15.6.1 → HFS+)
+- PSCI / spin-table untuk membawa CPU 1..7
 
 ---
 
@@ -276,24 +361,37 @@ fastboot boot prebuilt/tissot-boot.img
 - [x] Patch 0001 dibuat & teruji apply
 - [x] Script fetch/apply & build-driver + cek toolchain
 - [x] Patch 0002 — UART console tissot (draft, apply teruji)
-- [ ] Patch 0003 — platform identify (ADT)
-- [ ] Patch 0004 — ARM64_LINK_ADDR
-- [ ] CI macOS → kernel pertama
 - [x] `mkadt.py` untuk MSM8953 (template + override, round-trip terbukti)
-- [ ] `shim/` untuk tissot
+- [x] Patch 0003 — **driver GICv2 (GIC-400)** + ack/EOI MMIO (draft, apply teruji)
+- [x] ADT memuat `/arm-io/gic`, `/arm-io/gic-timebase`, frekuensi `/cpus` (audit 12/12)
+- [ ] CI macOS → kernel pertama  ← **langkah berikutnya yang bisa dikerjakan tanpa hardware**
+- [ ] `shim/` untuk tissot (map kernel fisik → VA `0xfffffff007004000`)
+- [ ] `mkpayload.py` (kernel + ADT + boot-args → payload)
+- [ ] Verifikasi group 0 vs group 1 GIC di hardware
 - [ ] `mkiosroot.sh` dari IPSW 15.6.1
+- [ ] PSCI / spin-table untuk CPU 1..7
 - [ ] Boot pertama + baca log via UART
 
 ---
 
 ## 7. Catatan jujur
 
-Yang sudah ada sekarang adalah **fondasi yang benar dan terverifikasi** —  
-bukan kernel yang bisa boot. Tiga pekerjaan terbesar yang tersisa (UART,  
-platform identify/ADT, dan SHIM) adalah kerja rendah-level yang butuh  
-perangkat fisik untuk iterasi. Tanpa Mi A1 + bootloader unlocked + akses  
-UART, kemajuannya akan sangat lambat.
+Yang sudah ada sekarang adalah **fondasi yang benar dan terverifikasi** —
+bukan kernel yang bisa boot. Semua jalur yang dibutuhkan XNU untuk mencapai
+`rtclock` sudah tertutup di sisi source: **UART** (patch 0002), **interrupt
+controller + timer** (patch 0003), **device tree** (`mkadt.py`), dan
+**boot image** (`make_tissot_bootimg.py`).
 
-Risiko ARMv8.0 sendiri sudah jauh berkurang karena memakai iOS 15  
-(lihat `docs/IOS15-VS-IOS16-ARMv8.md`), dan source-nya terbukti bebas  
+Yang masih menghalangi, berurutan menurut besar-kecilnya:
+
+1. **SHIM** — belum ada kode yang menyambut kendali dari ABL dan menyiapkan
+   MMU/page table sebelum melompat ke `_start` XNU. Tanpa ini kernel tidak
+   akan pernah dieksekusi.
+2. **Build kernel di macOS** — patch 0001–0003 belum pernah dikompilasi.
+   Error compiler pertama akan menjadi petunjuk patch berikutnya.
+3. **Verifikasi hardware** — group 0/1 GIC dan offset register UART hanya
+   bisa dipastikan di Mi A1 asli.
+
+Risiko ARMv8.0 sendiri sudah jauh berkurang karena memakai iOS 15
+(lihat `docs/IOS15-VS-IOS16-ARMv8.md`), dan source-nya terbukti bebas
 instruksi LSE/FP16.

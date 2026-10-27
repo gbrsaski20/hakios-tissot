@@ -246,7 +246,13 @@ def pack_bootimg(kernel, ramdisk, dtb, second=b"", adt=b"",
 # ---------------------------------------------------------------------------
 # verify: re-parse the produced image
 # ---------------------------------------------------------------------------
-def verify_bootimg(data, page_size=PAGE_SIZE):
+def verify_bootimg(data, page_size=PAGE_SIZE, adt_len=0, adt_expected=b""):
+    """Re-parse a packed image and check every structure.
+
+    adt_len/adt_expected: when the caller embedded an Apple Device Tree, pass
+    its length and bytes so the ADT section is verified byte-for-byte instead
+    of just being reported as "whatever is left in the file".
+    """
     msgs = []
     ok = True
 
@@ -344,17 +350,39 @@ def verify_bootimg(data, page_size=PAGE_SIZE):
                 f"({pages_for(ramdisk_size)} page(s))")
     if second_size:
         msgs.append(f"  second   @ 0x{s_off:06x}  {second_size} bytes")
-    msgs.append(f"  dtb      @ 0x{d_off:06x}  {dtb_size} bytes  ({dtb_src})")
+    if appended_dtb:
+        msgs.append(f"  dtb        (inside kernel payload, "
+                    f"Image.gz-dtb)  {dtb_size} bytes")
+    else:
+        msgs.append(f"  dtb      @ 0x{d_off:06x}  {dtb_size} bytes  ({dtb_src})")
 
     # ---- Apple Device Tree section (our extension) ----
-    adt_off = d_off + pages_for(dtb_size, hdr_page_size) * hdr_page_size
-    adt_region = data[adt_off:]
-    adt_size = len(adt_region)
-    if adt_size:
-        msgs.append(f"  adt      @ 0x{adt_off:06x}  {adt_size} bytes  "
-                    f"(Apple Device Tree)")
+    #
+    # In gz-dtb mode the FDT is appended *inside* the kernel payload, so there
+    # is no separate dtb section and the ADT follows the ramdisk directly.
+    # Adding dtb pages here would report an offset 1 page too far.
+    if appended_dtb:
+        adt_off = d_off
     else:
-        msgs.append(f"  adt      @ 0x{adt_off:06x}  (none)")
+        adt_off = d_off + pages_for(dtb_size, hdr_page_size) * hdr_page_size
+
+    if adt_len:
+        adt_region = data[adt_off:adt_off + adt_len]
+        adt_pad = len(data) - (adt_off + adt_len)
+        if adt_region == adt_expected:
+            note = "Apple Device Tree, byte-identical to source"
+        else:
+            ok = False
+            note = "Apple Device Tree, MISMATCH vs source"
+        msgs.append(f"  adt      @ 0x{adt_off:06x}  {adt_len} bytes "
+                    f"(+{adt_pad}B pad)  ({note})")
+    else:
+        adt_region = data[adt_off:]
+        if adt_region:
+            msgs.append(f"  adt      @ 0x{adt_off:06x}  {len(adt_region)} bytes "
+                        f"(Apple Device Tree)")
+        else:
+            msgs.append(f"  adt      @ 0x{adt_off:06x}  (none)")
 
     # Verify SHA-1 over the bytes exactly as stored
     sha1 = hashlib.sha1()
@@ -533,8 +561,10 @@ def main(argv=None):
               f"(image offset 0x{adt_img_off:06x})  <- for SHIM boot_args.deviceTreeP")
         print()
 
-    # ---- verify ----
-    ok, msgs = verify_bootimg(img, page_size=args.page_size)
+    # ---- verify (includes a byte-for-byte check of the embedded ADT) ----
+    ok, msgs = verify_bootimg(img, page_size=args.page_size,
+                              adt_len=len(adt) if adt else 0,
+                              adt_expected=adt)
     print("  Verification (re-parse of packed image):")
     for m in msgs:
         print(f"    {m}" if m else "")
@@ -547,37 +577,6 @@ def main(argv=None):
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "wb") as f:
         f.write(img)
-
-    # ---- ADT round-trip: extract embedded ADT, compare to source ----
-    if adt:
-        ok_rt, msgs_rt = verify_bootimg(img, page_size=args.page_size)
-        # re-extract adt section bytes from the written image
-        ps = args.page_size
-        off = ps
-        ksize = struct.unpack_from("<I", img, 8)[0]
-        off += pages_for(ksize, ps) * ps
-        rsize = struct.unpack_from("<I", img, 16)[0]
-        off += pages_for(rsize, ps) * ps
-        ssize = struct.unpack_from("<I", img, 24)[0]
-        off += pages_for(ssize, ps) * ps
-        # dtb section only in raw mode
-        if args.kernel_format == "raw":
-            dsize = len(img) - off  # dtb+adt combined region
-            # we stored dtb then adt; dtb is the FDT-sized chunk
-            if len(img[off:]) >= 8 and struct.unpack(">I", img[off:off+4])[0] == 0xD00DFEED:
-                dsize = struct.unpack(">I", img[off+4:off+8])[0]
-                dsize = pages_for(dsize, ps) * ps
-            else:
-                dsize = 0
-            off += dsize
-        adt_extracted = img[off:off + len(adt)]
-        match = (adt_extracted == adt)
-        print(f"  ADT round-trip: extracted {len(adt_extracted)} bytes from image, "
-              f"{'BYTE-IDENTICAL ✅' if match else 'MISMATCH ❌'}")
-        if not match:
-            print(f"    expected first 16: {adt[:16].hex(' ')}")
-            print(f"    got      first 16: {adt_extracted[:16].hex(' ')}")
-        print()
 
     print(f"  Wrote: {os.path.relpath(args.out, root_dir)}  "
           f"({len(img)} bytes, {pages_for(len(img), args.page_size)} pages)")

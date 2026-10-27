@@ -196,12 +196,13 @@ Catatan umum:
 - `ctf_insert` / `kextsymboltool` tidak ditemukan → runner butuh Xcode
   command line tools versi penuh, atau pakai image
   `blacktop/darwin-xnu-build` (yang dipakai ios-sweet), atau build di Mac fisik.
-- Error di `pexpert/arm/pe_identify_machine.c` → butuh patch 0003 (platform
-  identify / ADT).
+- Error di `pexpert/arm/pe_fiq.c` → patch 0003 (GICv2) perlu disesuaikan;
+  kemungkinan besar tipe/API berbeda antar versi XNU.
+- Error di `osfmk/arm64/sleh.c` → pastikan `<pexpert/arm/protos.h>` ikut
+  ter-include (sudah ada di source asli, jadi seharusnya aman).
 
-Langkah 0002–0004 di `docs/XNU8020-PORT-PLAN.md` kemungkinan masih perlu
-ditulis sebelum build benar-benar bersih. Kalau build gagal di file tertentu,
-itulah petunjuk patch berikutnya yang harus dibuat.
+Patch 0001–0003 sudah ada. Kalau build gagal di file tertentu, **file itu
+adalah petunjuk patch berikutnya** — bukan tanda fondasinya salah.
 
 ---
 
@@ -369,14 +370,23 @@ fastboot reboot
 | A1–A2 (tools) | ✅ |
 | A3 (unlock) | 🔒 butuh HP + waktu tunggu Mi Unlock |
 | A4–A5 (backup, IPSW) | ✅ |
-| B (source + patch) | ✅ **sudah jalan** |
-| C (build CI) | ✅ workflow siap, tapi kernel kemungkinan masih gagal → butuh patch 0002–0004 |
-| D1–D2 (DeviceTree + ADT) | ✅ |
+| B (source + patch) | ✅ **0001 + 0002 + 0003 sudah jalan** |
+| C (build CI) | ✅ workflow siap; patch 0002–0003 sudah ada, tinggal lihat error compiler pertama |
+| D1–D2 (DeviceTree + ADT) | ✅ ADT kini lengkap (GIC + timer + frekuensi), audit 12/12 |
 | D3 (root iOS) | ⏳ butuh `mkiosroot.sh` |
-| E (boot image) | ✅ pipeline siap |
-| F (flash/boot) | 🔒 + ⏳ butuh kernel & driver |
+| E (boot image) | ✅ pipeline siap, ADT ter-embed byte-identik |
+| F (flash/boot) | 🔒 + ⏳ butuh kernel & SHIM |
 | G (rollback) | ✅ |
 
 **Intinya:** semua yang tidak butuh macOS dan tidak butuh hardware sudah
-selesai dan bisa dijalankan sekarang. Yang tersisa adalah pekerjaan kernel
-(patch 0002–0004) dan komponen ios-sweet (`mkadt`, `shim`, `mkiosroot`).
+selesai dan bisa dijalankan sekarang. Yang tersisa adalah **SHIM** (kode yang
+menyambut kendali dari ABL dan menyiapkan MMU sebelum masuk `_start` XNU),
+**build kernel di CI macOS**, dan **verifikasi di hardware**.
+
+### Yang berubah di patch 0003
+
+Kalau kamu ingin tahu kenapa interrupt butuh patch tersendiri: XNU hanya punya
+driver **Apple AIC** dan **GICv3** (yang cuma aktif untuk VMAPPLE). MSM8953
+memakai **GIC-400 = GICv2**, dan untuk build non-GICv3 `pe_init_fiq()` di
+source asli **kosong**. Tanpa patch 0003 kernel akan keluar beberapa baris ke
+UART lalu hang selamanya — tidak pernah menerima interrupt timer.
