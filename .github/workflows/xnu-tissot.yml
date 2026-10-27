@@ -325,21 +325,33 @@ jobs:
 
           # Anotasi: kalau build gagal, konteks error dipancarkan sebagai
           # ::error:: supaya kelihatan di tab Checks tanpa perlu login untuk
-          # mengunduh artefak. Baris `make: *** [target] Error N` saja tidak
-          # cukup — yang menjelaskan biasanya 3 baris tepat di atasnya.
+          # mengunduh artefak.
+          #
+          # Prioritas: baris 'error:' PERTAMA (itu akar masalahnya; 156 error
+          # berikutnya biasanya cuma efek berantai), lalu 2 baris sesudahnya.
+          # Kalau tidak ada 'error:', pakai 3 baris sebelum 'make: ***'.
           if [ -s build.log ]; then
-            first="$(grep -n -m1 -E "make(\[[0-9]+\])?: \*\*\*" build.log | cut -d: -f1)"
+            first="$(grep -n -m1 -E 'error:' build.log | cut -d: -f1)"
             if [ -n "$first" ]; then
-              start=$((first - 3))
-              [ "$start" -lt 1 ] && start=1
-              sed -n "${start},${first}p" build.log | while IFS= read -r l; do
+              end=$((first + 2))
+              sed -n "${first},${end}p" build.log | while IFS= read -r l; do
                 [ -n "$l" ] || continue
                 echo "::error::$(printf '%s' "$l" | cut -c1-280)"
               done
             else
-              grep -v '^[[:space:]]*$' build.log | tail -3 | while IFS= read -r l; do
-                echo "::error::$(printf '%s' "$l" | cut -c1-280)"
-              done
+              mk="$(grep -n -m1 -E "make(\[[0-9]+\])?: \*\*\*" build.log | cut -d: -f1)"
+              if [ -n "$mk" ]; then
+                start=$((mk - 3))
+                [ "$start" -lt 1 ] && start=1
+                sed -n "${start},${mk}p" build.log | while IFS= read -r l; do
+                  [ -n "$l" ] || continue
+                  echo "::error::$(printf '%s' "$l" | cut -c1-280)"
+                done
+              else
+                grep -v '^[[:space:]]*$' build.log | tail -3 | while IFS= read -r l; do
+                  echo "::error::$(printf '%s' "$l" | cut -c1-280)"
+                done
+              fi
             fi
           fi
 
