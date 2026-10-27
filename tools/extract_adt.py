@@ -27,7 +27,7 @@ This script:
 
 Usage
 -----
-    python tools/extract_adt.py F:\\SETUP\\iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw
+    python tools/extract_adt.py F:\\SETUP\\iPhone10,3,iPhone10,6_15.6.1_19G82_Restore.ipsw
     python tools/extract_adt.py <ipsw> --device d221ap --out somewhere/
     python tools/extract_adt.py <ipsw> --list
 

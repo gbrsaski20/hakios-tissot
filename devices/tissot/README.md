@@ -1,7 +1,9 @@
 # Device profile: Xiaomi Mi A1 (codename `tissot`)
 
-This is an **ios-sweet-style** ARM port target (not HakiOS-x86's x86_64 PC path).
-Goal: run iOS 16.7.16 (iPhone X) **natively** on the Mi A1's ARM64 SoC.
+This is an **ios-sweet-style** ARM port target: run iOS natively on the
+Mi A1's ARM64 SoC (no emulation, no x86 anywhere in this repo).
+Goal: run **iOS 15.6.1 (19G82)** — iPhone X (`d22ap`) userland — **natively**
+on the Mi A1's ARM64 SoC.
 
 ## Hardware
 
@@ -19,9 +21,13 @@ Goal: run iOS 16.7.16 (iPhone X) **natively** on the Mi A1's ARM64 SoC.
 - Cortex-A53 has **no PAC** (Pointer Authentication) — same gate iPhone X satisfied.
 
 ## Why it is risky
-- MSM8953 is **ARMv8.0** (2017); every confirmed iOS-16 port runs on
-  **ARMv8.2-class** SoCs. iOS 16 / XNU may use ARMv8.1/8.2 instructions that
-  fault on an A53. **Verify this before investing.** (See `docs/PORT-TISSOT.md` §6.)
+- MSM8953 is **ARMv8.0** (2017); the confirmed ios-sweet ports run on
+  **ARMv8.2-class** SoCs. That is exactly why this port uses **iOS 15, not 16**:
+  iOS 15 still ships to the iPhone 6s (A9, ARMv8.0), so its `arm64` userland
+  cannot use ARMv8.1/8.2 instructions. See `docs/IOS15-VS-IOS16-ARMv8.md`.
+- Still unproven: whether XNU 8020 itself stays within ARMv8.0 when compiled
+  with `-mcpu=cortex-a53`. Source scan found no LSE/FP16 usage, which supports
+  it, but only hardware will confirm.
 
 ## Files in this folder
 | File | Purpose |
@@ -122,6 +128,6 @@ bukan XNU. Untuk XNU ARM64 asli butuh cctools + macOS SDK.
 2. Build XNU ARM64 asli, taruh di `prebuilt/tissot-kernel-arm64.Image`
    lalu jalankan ulang packer.
 3. Bring-up driver MSM8953 (UART dulu, lalu display/touch).
-4. Root iOS (`ios16-root.simg`) via `mkiosroot.sh` dari ios-sweet.
+4. Root iOS (`ios15-root.simg`) via `mkiosroot.sh` dari ios-sweet.
 
 Lihat `docs/PORT-TISSOT.md` untuk langkah lengkap dan **risiko ARMv8.0 §6**.

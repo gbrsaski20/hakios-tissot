@@ -1,209 +1,149 @@
 # ============================================================================
-# HakiOS-x86 Makefile
+# HakiOS — XNU (kernel Darwin/iOS) untuk Xiaomi Mi A1 (tissot / MSM8953)
 #
-# Port of the HakiOS XNU research project to x86_64.
-# Like Bliss OS, but for the Darwin/XNU kernel instead of Android/Linux.
+# Target: Qualcomm MSM8953, 8x Cortex-A53, ARMv8.0-A, tanpa PAC.
+# Sumber kernel: xnu-8020.140.41 (generasi iOS 15), APSL 2.0.
 #
 # Targets:
-#   make x86-open     Build the open kernel + placeholder loader + tiny user space
-#   make x86-full     Build the full system (needs iOS IPSW)
-#   make qemu-open    Run the open kernel in QEMU
-#   make qemu         Run the full iOS user space in QEMU
-#   make clean        Remove build artifacts
-#   make distclean    Remove everything including downloaded sources
+#   make tissot         Rakit prebuilt/tissot-boot.img (Python saja, tanpa compiler)
+#   make adt            Rakit prebuilt/tissot.adt dari ADT iPhone X + override MSM8953
+#   make check          Audit ADT terhadap semua syarat XNU
+#   make xnu8020        Unduh source XNU 8020 + terapkan patch 0001..0003
+#   make xnu8020-check  Cek toolchain build kernel (butuh macOS)
+#   make clean          Hapus artefak build
+#   make distclean      Hapus termasuk source yang diunduh
+#
+# Catatan penting: `make tissot` TIDAK mem-build XNU. Ia merakit boot image
+# dari kernel yang sudah ada. Build kernel XNU sendiri butuh macOS + cctools
+# + SDK Apple — lihat docs/XNU8020-PORT-PLAN.md bagian 5, atau jalankan
+# workflow GitHub Actions ".github/workflows/xnu-tissot.yml".
 # ============================================================================
 
-# Directories
+# ---- Directories -----------------------------------------------------------
 ROOT     := $(CURDIR)
 XNU_DIR  := $(ROOT)/xnu
-LOADER   := $(ROOT)/xnuloader
-USERLAND := $(ROOT)/userland
-QEMU_DIR := $(ROOT)/qemu
 TOOLS    := $(ROOT)/tools
 PREBUILT := $(ROOT)/prebuilt
+DEVICE   := $(ROOT)/devices/tissot
 
-# Build settings
-JOBS     ?= 8
+# ---- Settings --------------------------------------------------------------
+PYTHON   ?= python3
+JOBS     ?= 4
 KERNEL_CONFIG ?= DEVELOPMENT
 
-# QEMU settings
-QEMU_MEM  ?= 4096
-QEMU_CPUS ?= 2
-QEMU_DISPLAY ?= gtk
-QEMU_SECS ?= 1200
-
-# Kernel command line
-KERNEL_CMDLINE ?= "cpus=$(QEMU_CPUS) display=1 input=1 disk=1 net=1 serial=1"
-
-# Programs
-QEMU     ?= qemu-system-x86_64
-CLANG    ?= clang
-MAKE     ?= make
+# ADT source: the real iPhone X device tree pulled from the iOS 15.6.1 IPSW.
+# Required by MobileGestalt, so the iPhone X identity is kept on purpose.
+ADT_TEMPLATE ?= $(DEVICE)/dt/d22ap_15.6.1.adt
 
 .DEFAULT_GOAL := help
 
-.PHONY: help x86-open x86-full qemu-open qemu clean distclean \
-        kernel loader userland images deps tissot tissot-clean \
-        xnu8020 xnu8020-check
+.PHONY: help tissot adt check xnu8020 xnu8020-check kernel-clean \
+        clean distclean
 
+# ============================================================================
 help:
-	@echo "HakiOS-x86 — XNU kernel on x86_64 PC/QEMU"
+	@echo "HakiOS — XNU untuk Xiaomi Mi A1 (tissot / MSM8953, ARM64)"
 	@echo ""
-	@echo "Build targets:"
-	@echo "  make x86-open    Build open kernel + loader + tiny user space"
-	@echo "  make x86-full    Build full system (needs IPSW)"
-	@echo "  make qemu-open    Run open kernel in QEMU"
-	@echo "  make qemu         Run full iOS user space in QEMU"
-	@echo "  make clean        Remove build artifacts"
-	@echo "  make distclean    Remove everything"
+	@echo "Rakit (tidak butuh compiler):"
+	@echo "  make adt            Rakit prebuilt/tissot.adt (ADT untuk XNU)"
+	@echo "  make check          Audit ADT terhadap syarat XNU (12 cek)"
+	@echo "  make tissot         Rakit prebuilt/tissot-boot.img"
 	@echo ""
-	@echo "Mi A1 / tissot (ARM64) targets:"
-	@echo "  make tissot       Build flashable tissot-boot.img (no compiler needed)"
-	@echo "  make tissot-clean Remove tissot artifacts"
+	@echo "Kernel XNU (butuh macOS / GitHub Actions):"
+	@echo "  make xnu8020        Unduh source + terapkan patch 0001..0003"
+	@echo "  make xnu8020-check  Cek toolchain (akan gagal di Windows/Linux)"
 	@echo ""
-	@echo "Variables:"
-	@echo "  JOBS=$(JOBS)          Parallel build jobs"
-	@echo "  KERNEL_CONFIG=$(KERNEL_CONFIG)  DEVELOPMENT|RELEASE|DEBUG"
-	@echo "  QEMU_MEM=$(QEMU_MEM)         QEMU memory (MB)"
-	@echo "  QEMU_CPUS=$(QEMU_CPUS)       QEMU CPU count"
-	@echo "  QEMU_DISPLAY=$(QEMU_DISPLAY)  gtk|none|sdl"
-	@echo "  QEMU_SECS=$(QEMU_SECS)       Session length (seconds)"
+	@echo "Bersih-bersih:"
+	@echo "  make clean          Hapus artefak build"
+	@echo "  make distclean      Hapus termasuk source yang diunduh"
+	@echo ""
+	@echo "Variabel:"
+	@echo "  PYTHON=$(PYTHON)   JOBS=$(JOBS)   KERNEL_CONFIG=$(KERNEL_CONFIG)"
+	@echo ""
+	@echo "Alur lengkap: make adt -> (build kernel di CI) -> make tissot"
+	@echo "             -> fastboot boot prebuilt/tissot-boot.img"
 
 # ============================================================================
-# Dependencies: XNU sources + build tools
-# ============================================================================
-
-deps:
-	@echo ">>> Setting up XNU build dependencies for x86_64..."
-	@xnu-deps/setup.sh
-
-# ============================================================================
-# Kernel: apply patch + build for X86_64
-# ============================================================================
-
-kernel:
-	@echo ">>> Building XNU kernel for X86_64..."
-	@if [ ! -d "xnu-src" ]; then \
-		echo ">>> Applying XNU patch..."; \
-		$(XNU_DIR)/apply.sh; \
-	fi
-	@$(XNU_DIR)/../xnu-build-x86.sh -j$(JOBS) -c $(KERNEL_CONFIG)
-	@echo ">>> Kernel built. Copying to prebuilt/..."
-	@mkdir -p $(PREBUILT)
-	@cp xnu-src/build/obj/$(KERNEL_CONFIG)_X86_64/mach.$(KERNEL_CONFIG).hakios \
-		$(PREBUILT)/mach.$(KERNEL_CONFIG).x86_64 2>/dev/null || \
-		echo ">>> Note: copy may fail if BUILD dir name differs. Check xnu-src/build/"
-
-# ============================================================================
-# Boot loader: UEFI x86_64 application
-# ============================================================================
-
-loader:
-	@echo ">>> Building xnuloader for x86_64..."
-	@$(LOADER)/build.sh
-	@mkdir -p $(PREBUILT)
-	@cp $(LOADER)/build/xnuloader.efi $(PREBUILT)/ 2>/dev/null || true
-	@if [ ! -f "$(PREBUILT)/xnuloader.efi" ]; then \
-		echo ">>> Trying Python fallback..."; \
-		python3 $(LOADER)/build_efi.py || python $(LOADER)/build_efi.py; \
-	fi
-	@echo ">>> Loader built."
-
-# ============================================================================
-# User space and images
-# ============================================================================
-
-userland:
-	@echo ">>> Building user space..."
-	@REST=1 $(USERLAND)/build.sh
-
-images: userland
-	@echo ">>> Images are built as part of userland."
-
-# ============================================================================
-# Mi A1 (tissot / MSM8953) — ARM64 Android boot image
+# ADT — Apple Device Tree untuk MSM8953
 #
-# Pure Python: no mkbootimg, no dtc, no compiler required.
-# Produces a valid Android boot image (header v0, page 2048) containing
-# an ARM64 Image + device tree + ramdisk.
+# XNU TIDAK memakai FDT Linux. Ia memakai format Device Tree milik Apple,
+# dibaca lewat SecureDT*. mkadt.py mengambil ADT asli iPhone X lalu
+# menimpa bagian yang dibutuhkan MSM8953:
+#   /arm-io:ranges            -> soc base 0x07800000
+#   /arm-io/serial:reg        -> UART 0x78AF000
+#   /arm-io/aic -> /arm-io/gic-> GIC-400 (GICv2) 0x0B000000 / 0x0B002000
+#   /arm-io/gic-timebase      -> node device_type=timer
+#   /cpus/cpuN:*frequency*    -> 19.2 MHz dsb (ADT asli semua 0 -> bagi nol)
+#   /memory:reg               -> 0x80000000 + 4 GiB
 # ============================================================================
 
-PYTHON ?= python3
+adt:
+	@echo ">>> Merakit ADT untuk tissot..."
+	@$(PYTHON) $(TOOLS)/mkadt.py --template "$(ADT_TEMPLATE)" --tissot \
+		--out $(PREBUILT)/tissot.adt
+
+check:
+	@echo ">>> Audit ADT terhadap syarat XNU (mkadt.py gagal kalau ada yang kurang)..."
+	@$(PYTHON) $(TOOLS)/mkadt.py --template "$(ADT_TEMPLATE)" --tissot \
+		--out $(PREBUILT)/tissot.adt | sed -n '/requirement audit/,/^$$/p'
+
+# ============================================================================
+# Boot image Android untuk tissot
+#
+# Format: Android boot image header v0, page 2048.
+#   page 0      header + padding
+#   page 1..N   kernel  (Image.gz + DTB appended = "Image.gz-dtb")
+#   page N+1..  ramdisk (cpio.gz minimal)
+#   setelahnya  ADT Apple (ekstensi kita; alamat fisiknya dicetak untuk SHIM)
+#
+# mkbootimg, dtc, dan compiler semuanya TIDAK dibutuhkan.
+# ============================================================================
 
 tissot:
-	@echo ">>> Building Mi A1 (tissot) ARM64 boot image..."
-	@$(PYTHON) tools/build_kernel_placeholder_arm64.py
-	@$(PYTHON) tools/build_tissot_dtb.py
-	@$(PYTHON) tools/make_tissot_bootimg.py
+	@echo ">>> Merakit boot image Mi A1 (tissot)..."
+	@if [ ! -f "$(PREBUILT)/tissot-kernel-arm64.Image" ]; then \
+		echo ">>> Kernel belum ada — memakai placeholder (wfi spin loop)."; \
+		$(PYTHON) $(TOOLS)/build_kernel_placeholder_arm64.py; \
+	fi
+	@if [ ! -f "$(PREBUILT)/tissot.dtb" ]; then \
+		echo ">>> DTB belum ada — membuat dari template tissot."; \
+		$(PYTHON) $(TOOLS)/build_tissot_dtb.py; \
+	fi
+	@if [ ! -f "$(PREBUILT)/tissot.adt" ]; then \
+		echo ">>> ADT belum ada — merakit dulu."; \
+		$(MAKE) --no-print-directory adt; \
+	fi
+	@$(PYTHON) $(TOOLS)/make_tissot_bootimg.py
 	@echo ""
-	@echo ">>> Done. Flash to Mi A1 (unlocked bootloader):"
-	@echo "      fastboot boot prebuilt/tissot-boot.img"
-
-tissot-clean:
-	@echo ">>> Removing tissot artifacts..."
-	@rm -f prebuilt/tissot-boot.img prebuilt/tissot.dtb prebuilt/tissot.dts \
-		prebuilt/tissot-kernel-arm64.Image prebuilt/tissot-ramdisk.cpio.gz
-	@echo ">>> Done."
+	@echo ">>> Selesai. Flash ke Mi A1 (bootloader harus unlocked):"
+	@echo "      fastboot devices"
+	@echo "      fastboot boot  prebuilt/tissot-boot.img    # coba tanpa menulis"
+	@echo "      fastboot flash boot prebuilt/tissot-boot.img"
 
 # ============================================================================
-# XNU 8020 (iOS 15) — fetch source + apply HakiOS/tissot patches
-# Building the kernel itself needs macOS + cctools + SDK (see
-# docs/XNU8020-PORT-PLAN.md).
+# Kernel XNU 8020 (iOS 15)
 # ============================================================================
 
 xnu8020:
+	@echo ">>> Menyiapkan source XNU 8020 + patch tissot..."
 	@./xnu/apply-8020.sh
 
 xnu8020-check:
 	@./xnu-build-arm64.sh --check
 
 # ============================================================================
-# Open build: kernel + placeholder loader + tiny user space (no IPSW)
-# ============================================================================
-
-x86-open: kernel loader
-	@echo ">>> Building open user space (no IPSW needed)..."
-	@$(USERLAND)/build.sh --open
-	@echo ">>> Open build complete."
-	@echo ">>> Run with: make qemu-open"
-
-# ============================================================================
-# Full build: needs the iOS IPSW
-# ============================================================================
-
-x86-full: kernel loader
-	@echo ">>> Fetching iOS 16.5 IPSW..."
-	@$(ROOT)/sysimage/fetch.sh
-	@echo ">>> Building full user space..."
-	@REST=1 $(USERLAND)/build.sh
-	@echo ">>> Full build complete."
-	@echo ">>> Run with: make qemu"
-
-# ============================================================================
-# QEMU targets
-# ============================================================================
-
-qemu-open:
-	@echo ">>> Starting QEMU (open kernel, $(QEMU_SECS)s session)..."
-	@mkdir -p logs
-	@$(QEMU_DIR)/run-x86.sh $(QEMU_SECS) --open -display $(QEMU_DISPLAY) \
-		> logs/qemu-open.log 2>&1
-
-qemu:
-	@echo ">>> Starting QEMU (full iOS user space, $(QEMU_SECS)s session)..."
-	@mkdir -p logs
-	@$(QEMU_DIR)/run-x86.sh $(QEMU_SECS) -display $(QEMU_DISPLAY) \
-		> logs/qemu.log 2>&1
-
-# ============================================================================
 # Clean
 # ============================================================================
 
 clean:
-	@echo ">>> Cleaning build artifacts..."
-	@rm -rf xnu-src/build xnuloader/build userland/build logs/*.log
-	@find . -name "*.o" -delete 2>/dev/null || true
+	@echo ">>> Menghapus artefak build..."
+	@rm -f prebuilt/tissot-boot.img prebuilt/tissot.dtb prebuilt/tissot.dts \
+		prebuilt/tissot-kernel-arm64.Image prebuilt/tissot-ramdisk.cpio.gz \
+		prebuilt/tissot.adt
+	@rm -f logs/*.log
+	@echo ">>> Selesai. (prebuilt/tissot-kernel-arm64.Image hasil CI juga dihapus)"
 
 distclean: clean
-	@echo ">>> Removing all downloaded/built content..."
-	@rm -rf xnu-src xnu-deps/build prebuilt/* userland/*.apfs sysimage/*.ipsw
+	@echo ">>> Menghapus termasuk source yang diunduh..."
+	@rm -rf xnu-src-8020 xnu-deps/build xnu-src
+	@echo ">>> Selesai."

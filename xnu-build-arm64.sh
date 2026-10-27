@@ -21,6 +21,7 @@
 #   ./xnu-build-arm64.sh                    # SDKROOT defaults to "iphoneos"
 #   SDKROOT=iphoneos ./xnu-build-arm64.sh
 #   ./xnu-build-arm64.sh --config RELEASE --jobs 8
+#   ./xnu-build-arm64.sh --no-werror        # WERROR= (clang baru, warning lama)
 # ============================================================================
 set -u
 
@@ -32,16 +33,18 @@ CONFIG="DEVELOPMENT"
 JOBS=""
 MODE="build"
 FORCE=0
+NOWERROR=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --check)  MODE="check" ;;
-        --print)  MODE="print" ;;
-        --force)  FORCE=1 ;;
+        --check)     MODE="check" ;;
+        --print)     MODE="print" ;;
+        --force)     FORCE=1 ;;
+        --no-werror) NOWERROR=1 ;;
         --config) CONFIG="$2"; shift ;;
         --jobs)   JOBS="$2"; shift ;;
         -h|--help)
-            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) echo "unknown option: $1"; exit 1 ;;
     esac
@@ -57,6 +60,7 @@ echo "============================================================"
 echo "  source : $SRC"
 echo "  config : $CONFIG"
 echo "  jobs   : $JOBS"
+[ "$NOWERROR" -eq 1 ] && echo "  WERROR : dimatikan (--no-werror)"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -141,6 +145,17 @@ MAKE_CMD=(make -C "$SRC" -j"$JOBS"
           CURRENT_MACHINE_CONFIG="$MACHINE"
           SDKROOT="$SDK_NAME")
 
+# XNU sets WERROR := -Werror in makedefs/MakeInc.def. A clang much newer than
+# XNU 8020 (2021) turns new warnings on by default, which -Werror then promotes
+# to errors — masking the *real* build errors. Passing WERROR= on the command
+# line overrides the makefile assignment, so this is a genuine knob, not a hack.
+#
+# NOTE: `arr+=(x)` is bash 4+ only and macOS still ships bash 3.2 as /bin/bash,
+# which is what GitHub's macOS runners use. Reassign instead.
+if [ "$NOWERROR" -eq 1 ]; then
+    MAKE_CMD=("${MAKE_CMD[@]}" WERROR=)
+fi
+
 case "$MODE" in
     check)
         if [ "$missing" -eq 0 ]; then
@@ -192,6 +207,10 @@ if [ $rc -ne 0 ]; then
     echo "      - pexpert/arm64/board_config.h needs more TISSOT knobs"
     echo "      - ARM64_LINK_ADDR must match where the bootloader loads the kernel"
     echo "      - missing Apple-only headers/kexts for embedded targets"
+    echo ""
+    echo "    Re-run with the log saved to see the first real error:"
+    echo "      ./xnu-build-arm64.sh 2>&1 | tee build.log"
+    echo "      grep -n -m 40 -i 'error:' build.log"
     exit $rc
 fi
 
@@ -207,10 +226,15 @@ if [ -n "$found" ]; then
     mkdir -p "$ROOT/prebuilt"
     first="$(echo "$found" | head -1)"
     cp "$first" "$ROOT/prebuilt/tissot-kernel-arm64.Image"
+    gzip -9 -c "$first" > "$ROOT/prebuilt/tissot-kernel-arm64.Image.gz"
     echo ""
     echo ">>> copied to prebuilt/tissot-kernel-arm64.Image"
-    echo ">>> now repack the boot image:"
-    echo "      ./devices/tissot/build-bootimage.sh --kernel prebuilt/tissot-kernel-arm64.Image"
+    echo "    (+ .gz, compressed once for reference)"
+    echo ""
+    echo ">>> Catatan: hasilnya masih Mach-O (format kernel Apple), bukan Image"
+    echo "    Linux. ABL tidak bisa melompat langsung ke Mach-O — dibutuhkan"
+    echo "    SHIM. Sampai SHIM ada, boot image hanya untuk menguji pipeline:"
+    echo "      make tissot        # merakit prebuilt/tissot-boot.img"
 else
     echo "    no kernel.* found under $SRC/BUILD/obj"
     echo "    check the build log"

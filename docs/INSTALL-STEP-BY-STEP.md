@@ -135,10 +135,11 @@ Harus keluar satu baris berisi `-mcpu=cortex-a53`.
 > Kenapa tidak di PC? XNU butuh clang + **cctools** (ld, ctf_insert,
 > kextsymboltool) + SDK Apple, dan build system-nya berasumsi macOS.
 > GitHub menyediakan runner macOS gratis untuk repo publik.
+> Ini soal **mesin build**, bukan target — targetnya tetap Mi A1.
 
 ## C1. Buat repo & push
 
-1. Buat repo baru di GitHub (boleh **private**).
+1. Buat repo baru di GitHub (publik = menit macOS gratis).
 2. Di folder proyek:
 
 ```bat
@@ -150,34 +151,58 @@ git remote add origin https://github.com/<USERNAME>/<REPO>.git
 git push -u origin main
 ```
 
-> ⚠️ **Jangan commit** IPSW / firmware / `stock-boot.img` (ukuran besar &
-> berhak cipta). Tambahkan `.gitignore`:
+> ⚠️ **Jangan commit** IPSW / firmware / `stock-boot.img` (besar & berhak
+> cipta). `.gitignore` di repo sudah menutup semuanya: `*.ipsw`, `*.tgz`,
+> `xnu-src-8020/`, `devices/tissot/dt/*.img`, `prebuilt/*.img`, `prebuilt/*.adt`.
 
-```
-*.ipsw
-*.fdmdownload
-*.tgz
-xnu-src-8020/
-devices/tissot/dt/*.img
-devices/tissot/dt/*.dtb
-prebuilt/*.img
-```
+> Catatan: `devices/tissot/dt/d22ap_15.6.1.adt` **tidak** ikut ter-push (data
+> Apple). Akibatnya job `package` di CI membuat boot image **tanpa** ADT dan
+> memberi peringatan. Itu wajar — ADT hanya ada di PC kamu.
 
 ## C2. Jalankan workflow
 
 1. Buka tab **Actions** di repo.
-2. Pilih workflow **`xnu-tissot`** → **Run workflow** → **Run**.
-3. Tunggu ~30–60 menit (build XNU penuh itu lama).
+2. Pilih workflow **`xnu-tissot`** → **Run workflow**.
+3. Isi:
+   - `config`: `DEVELOPMENT` (default), `RELEASE`, atau `DEBUG`
+   - `pack`: `true` kalau mau sekalian merakit `tissot-boot.img`
+4. Klik **Run workflow**.
+
+Tiga job berjalan berurutan:
+
+| Job | Runner | Waktu | Isi |
+|-----|--------|-------|-----|
+| `patches` | ubuntu | ~2 mnt | apply 0001–0003 + cek 9 penanda + cek `arm64` (bukan `arm64e`) + `-mcpu=cortex-a53` + uji pipeline image |
+| `kernel` | macOS | ~20–40 mnt | `make ... ARM64 TISSOT` sungguhan |
+| `package` | ubuntu | ~1 mnt | rakit `tissot-boot.img` dari kernel hasil job 2 |
+
+Kalau `patches` merah, `kernel` tidak akan jalan — itu memang gerbangnya:
+patch rusak lebih murah ketahuan di Linux 2 menit daripada macOS 30 menit.
 
 ## C3. Unduh hasilnya
 
-Setelah selesai, di halaman run ada **Artifacts** → `xnu-tissot-kernel`.
+Di halaman run ada **Artifacts**:
 
-Isinya (kalau build sukses):
+| Artefak | Isi | Dipakai untuk |
+|---------|-----|---------------|
+| `xnu-tissot-kernel` | `mach.*` TISSOT (Mach-O ARM64) + `.gz` | bukti XNU terkompilasi; bahan SHIM |
+| `tissot-boot` | `tissot-boot.img` + `tissot.adt` + `tissot.dtb` | `fastboot boot` (lihat catatan di bawah) |
+| `tissot-boot-placeholder` | boot image dari job `patches` (kernel `wfi`) | menguji jalur flash/ABL hari ini |
+| `build-log` | `build.log` penuh | diagnosis kalau gagal |
 
+Letakkan kernel hasil unduhan di `prebuilt/tissot-kernel-arm64.Image`, lalu di
+PC:
+
+```bat
+make-tissot.bat
 ```
-tissot-kernel-arm64.Image
-```
+
+> **Penting — kernel hasil CI masih Mach-O.** ABL melompat ke offset 0 payload
+> boot image, dan header Mach-O bukan kode yang bisa dieksekusi. Jadi
+> `fastboot boot` sekarang belum akan sampai ke XNU. Yang menjembatani itu
+> adalah **SHIM** (belum ada). Sampai SHIM selesai, nilai build CI adalah:
+> membuktikan XNU 8020 bisa dikompilasi untuk TISSOT — gerbang utama sebelum
+> bicara booting.
 
 ## C4. Kalau build gagal
 
@@ -185,21 +210,29 @@ Workflow sengaja memakai `--force`, jadi ia **tetap mencoba build** walaupun
 precheck toolchain melaporkan sesuatu kurang. Artinya error yang kamu lihat
 adalah **error compiler asli**, bukan berhenti di precheck.
 
+Workflow juga otomatis **mengulang sekali dengan `WERROR=`** kalau log
+mengandung `-Werror`. Alasannya: XNU 8020 (2021) lebih tua dari clang di
+runner, jadi warning baru otomatis jadi error dan menutupi error sebenarnya.
+Percobaan kedua memisahkan keduanya. Build inkremental, jadi tidak mengulang
+dari nol.
+
 Yang perlu dilakukan saat gagal:
 
 1. Buka run yang gagal → **Artifacts** → download **`build-log`**.
 2. Cari baris pertama yang berisi `error:` — itu titik masalahnya.
-3. Kirim log itu; dari situ bisa ditentukan patch berikutnya (0003 / 0004).
+   (Ringkasan job sudah mencetak 40 yang pertama.)
+3. Kirim log itu; dari situ bisa ditentukan patch berikutnya.
 
 Catatan umum:
 
-- `ctf_insert` / `kextsymboltool` tidak ditemukan → runner butuh Xcode
-  command line tools versi penuh, atau pakai image
-  `blacktop/darwin-xnu-build` (yang dipakai ios-sweet), atau build di Mac fisik.
+- `ctf_insert` / `kextsymboltool` tidak ditemukan → runner macOS GitHub sudah
+  menyertakannya lewat Xcode; kalau hilang, `xcode-select -p` yang salah.
 - Error di `pexpert/arm/pe_fiq.c` → patch 0003 (GICv2) perlu disesuaikan;
   kemungkinan besar tipe/API berbeda antar versi XNU.
 - Error di `osfmk/arm64/sleh.c` → pastikan `<pexpert/arm/protos.h>` ikut
   ter-include (sudah ada di source asli, jadi seharusnya aman).
+- Error "unknown argument: -Wno-..." → itu warning clang baru; jalankan
+  `./xnu-build-arm64.sh --no-werror` untuk melihat error sesungguhnya.
 
 Patch 0001–0003 sudah ada. Kalau build gagal di file tertentu, **file itu
 adalah petunjuk patch berikutnya** — bukan tanda fondasinya salah.
@@ -266,6 +299,17 @@ Atau manual dari root proyek:
 python tools\make_tissot_bootimg.py --kernel prebuilt\tissot-kernel-arm64.Image
 ```
 
+> Kalau kernelnya hasil CI (Mach-O XNU), packer akan menolak karena tidak ada
+> magic `ARM\x64`. Itu benar: yang diharapkan packer adalah arm64 Image. Untuk
+> mengemas kernel XNU apa adanya, tambahkan:
+
+```bat
+python tools\make_tissot_bootimg.py --allow-foreign-kernel
+```
+
+Hasilnya tetap **belum bisa di-boot** (butuh SHIM), tapi berguna untuk
+memastikan ukuran/offset benar.
+
 ## E2. Verifikasi ✅
 
 Output yang benar terlihat seperti:
@@ -275,6 +319,14 @@ kernel check    = arm64 Image magic 'ARM\x64' OK (Image.gz-dtb, <size> bytes)
 dtb check       = FDT magic OK, totalsize=<n> (matches)
 sha1 id         = <hash>  (matches stored)
 Wrote: prebuilt\tissot-boot.img
+```
+
+Kalau memakai `--allow-foreign-kernel` dengan kernel XNU asli, baris pertama
+berubah menjadi (dan itu wajar):
+
+```
+kernel check    = Mach-O (XNU), bukan arm64 Image [Image.gz-dtb] — diterima
+                  PERINGATAN: Mach-O tidak bisa di-boot tanpa SHIM.
 ```
 
 ---
@@ -290,7 +342,7 @@ fastboot devices
 ## F2. (Kalau root iOS sudah siap) flash root ⏳
 
 ```bat
-fastboot -S 512M flash userdata ios16-root.simg
+fastboot -S 512M flash userdata ios15-root.simg
 ```
 
 > Proses ini ~7 menit. **Jangan cabut kabel.** Kalau fastboot hang setelah

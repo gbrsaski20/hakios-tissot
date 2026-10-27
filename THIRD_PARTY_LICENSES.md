@@ -1,33 +1,55 @@
 # Third-Party Licenses
 
-## XNU Kernel
-- **Origin**: Apple Inc. (https://github.com/apple/darwin-xnu)
-- **License**: Apple Public Source License 2.0 (APSL 2.0)
-- **Used in**: xnu/ (patch and driver files are derivatives)
-- **Version**: xnu-8796.121.2
+Proyek ini menargetkan Xiaomi Mi A1 (`tissot`). Yang di-*link*/dipakai saat
+build maupun saat menjalankan tool:
 
-## OVMF / EDK2 (UEFI firmware)
-- **Origin**: Tianocore (https://www.tianocore.org)
-- **License**: BSD-2-Clause-Patent + other licenses (see EDK2 license.txt)
-- **Used in**: QEMU UEFI firmware (not distributed, provided by your distribution)
-- **Used by**: xnuloader (our code targets UEFI, but does not include OVMF)
+## XNU Kernel
+- **Origin**: Apple Inc. (https://github.com/apple-oss-distributions/xnu)
+- **License**: Apple Public Source License 2.0 (APSL 2.0)
+- **Used in**: `xnu/patches-8020/` (patch series adalah derivative work)
+- **Version**: `xnu-8020.140.41` (generasi iOS 15)
+- **Catatan**: source-nya **tidak** di-commit; `xnu/apply-8020.sh` mengunduhnya
+  saat build.
 
 ## Clang / LLVM
 - **Origin**: LLVM Project (https://llvm.org)
 - **License**: Apache 2.0 with LLVM exceptions
-- **Used in**: Building the kernel and loader
+- **Used in**: Building the kernel (lewat Xcode di runner macOS)
+- **Catatan**: disediakan oleh toolchain Xcode, tidak didistribusikan repo ini.
 
-## 7-Zip
-- **Origin**: Igor Pavlov (https://www.7-zip.org)
-- **License**: LGPL 2.1 + unRAR restriction
-- **Used in**: Unpacking IPSW files
+## Apple cctools (ld64, ctf_insert, kextsymboltool)
+- **Origin**: Apple Inc. (bagian dari Xcode toolchain)
+- **License**: APSL 2.0 / Apple SDK agreement
+- **Used in**: Linking the kernel
+- **Catatan**: tidak didistribusikan; tersedia di macOS runner GitHub Actions.
 
-## QEMU
-- **Origin**: QEMU Project (https://www.qemu.org)
-- **License**: GPL 2.0
-- **Used in**: Running the system in emulation
+## lzfse
+- **Origin**: Apple Inc. (https://github.com/lzfse/lzfse)
+- **License**: BSD-3-Clause
+- **Used in**: `tools/extract_adt.py` — decompress payload `DeviceTree.d22ap.im4p`
+- **Catatan**: paket Python `lzfse` (opsional; script tetap jalan tanpa itu
+  untuk ekstraksi `.im4p` mentah).
 
-## lz4
-- **Origin**: Cyan (https://github.com/lz4/lz4)
-- **License**: BSD-2-Clause
-- **Used in**: Decompression during IPSW processing
+## Python standard library
+- **Origin**: Python Software Foundation
+- **License**: PSF License
+- **Used in**: semua tool di `tools/` (hanya `struct`, `gzip`, `hashlib`,
+  `zlib`, `argparse`, `os`, `sys`, `io`)
+
+## GitHub Actions (runner)
+- **Origin**: GitHub / Microsoft
+- **License**: GitHub Terms of Service
+- **Used in**: `.github/workflows/xnu-tissot.yml`
+- **Catatan**: `actions/checkout` dan `actions/upload-artifact` (MIT).
+
+---
+
+## Yang TIDAK didistribusikan repo ini
+
+| Item | Pemilik | Kenapa tidak ada |
+|------|---------|------------------|
+| IPSW iOS 15.6.1 | Apple | kamu unduh sendiri dari Apple CDN |
+| `boot.img` / DTB stock Mi A1 | Xiaomi | dari firmware milikmu sendiri |
+| XNU source | Apple | diunduh `apply-8020.sh` saat build |
+| Apple SDK / cctools | Apple | disediakan runner macOS |
+| ADT hasil ekstraksi | turunan IPSW | di-*gitignore*, dibuat lokal oleh `mkadt.py` |

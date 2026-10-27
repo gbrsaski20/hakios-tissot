@@ -1,73 +1,307 @@
 name: xnu-tissot
 
-# Build XNU 8020 (iOS 15) for Xiaomi Mi A1 (tissot / MSM8953).
+# ============================================================================
+# Build XNU 8020 (iOS 15) untuk Xiaomi Mi A1 — tissot / MSM8953 / Cortex-A53.
 #
-# XNU cannot be built on Windows/Linux with a plain toolchain: it needs
-# clang + Apple cctools (ld, ctf_insert, kextsymboltool) + an SDK, and the
-# build system assumes macOS. A GitHub macOS runner provides all of that
-# for free on public repositories.
+# TENTANG macOS — baca ini dulu:
+#
+#   Target workflow ini adalah Mi A1 (ARM64 Android), BUKAN macOS.
+#   macOS muncul di sini hanya sebagai MESIN BUILD, karena XNU adalah kernel
+#   Apple dan build system-nya butuh clang + cctools (ld yang paham Mach-O,
+#   ctf_insert, kextsymboltool) + SDK Apple, dengan makefile yang berasumsi
+#   userland BSD/macOS. Itu persyaratan host dan tidak berubah berapa pun
+#   targetnya. Proyek pembanding dipa-studio/ios-sweet juga membangun
+#   kernelnya di runner macOS.
+#
+#   Kamu tidak perlu punya Mac: repo publik dapat menit macOS gratis.
+#
+# Tiga job:
+#   patches  (ubuntu-latest)  — verifikasi patch 0001..0003 apply bersih ke
+#                               source XNU pristine. Cepat, tanpa macOS.
+#                               Ini yang menangkap patch rusak lebih dulu.
+#   kernel   (macos-latest)   — build kernel ARM64 sungguhan (mach.* TISSOT).
+#   package  (ubuntu-latest)  — rakit prebuilt/tissot-boot.img dari kernel
+#                               hasil job `kernel`. Python saja, tanpa macOS.
+#
+# Artefak yang bisa diunduh dari tab Actions:
+#   xnu-tissot-kernel  mach.* TISSOT (kernel mentah) + kernel.gz
+#   tissot-boot        prebuilt/tissot-boot.img  <- ini yang di-fastboot
+#   build-log          build.log lengkap
+# ============================================================================
 
 on:
   workflow_dispatch:
+    inputs:
+      config:
+        description: "Kernel config"
+        required: true
+        default: DEVELOPMENT
+        type: choice
+        options:
+          - DEVELOPMENT
+          - RELEASE
+          - DEBUG
+      pack:
+        description: "Rakit boot image setelah kernel jadi"
+        required: true
+        default: true
+        type: boolean
   push:
     paths:
       - "xnu/patches-8020/**"
       - "xnu/apply-8020.sh"
       - "xnu-build-arm64.sh"
+      - "tools/**"
+      - "Makefile"
       - ".github/workflows/xnu-tissot.yml"
 
+# Satu build pada satu waktu per ref; push baru membatalkan yang lama.
+concurrency:
+  group: xnu-tissot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XNU_TAG: xnu-8020.140.41
+
 jobs:
-  build:
-    runs-on: macos-latest
-    timeout-minutes: 90
+  # --------------------------------------------------------------------------
+  # Job 1 — verifikasi patch series (Linux, tanpa macOS)
+  #
+  # Mengunduh xnu-8020.140.41, menerapkan 0001..0003 berurutan, lalu memastikan
+  # setiap penanda patch benar-benar ada. Kalau ada yang gagal di sini, build
+  # kernel di job 2 pasti juga gagal — jadi ini gerbang cepat.
+  # --------------------------------------------------------------------------
+  patches:
+    name: "Verifikasi patch series (Linux)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify iOS SDK (PLATFORM=iPhoneOS comes from this)
-        run: |
-          echo "xcodebuild: $(xcodebuild -version | head -1)"
-          SDK="$(xcrun -sdk iphoneos -show-sdk-path)"
-          echo "iphoneos SDK: $SDK"
-          echo "platform    : $(xcrun -sdk iphoneos -show-sdk-platform-path)"
-          test -n "$SDK"
-          xcrun -sdk iphoneos --find clang
-          xcrun -sdk iphoneos --find ld
+      - name: Cache source XNU
+        uses: actions/cache@v4
+        with:
+          path: xnu-deps/build
+          key: xnu-src-${{ env.XNU_TAG }}-v1
 
-      - name: Report host toolchain
-        run: |
-          echo "host: $(uname -a)"
-          xcodebuild -version || true
-          clang --version | head -2 || true
-          for t in ld ctf_insert kextsymboltool make; do
-            printf '%-16s ' "$t"; command -v "$t" || echo "MISSING"
-          done
-          echo "SDKROOT=$SDKROOT"
-
-      - name: Fetch XNU 8020 and apply tissot patches
+      - name: Terapkan patch ke source XNU pristine
         run: |
           chmod +x xnu/apply-8020.sh xnu-build-arm64.sh
           ./xnu/apply-8020.sh
 
-      - name: Toolchain check (informational)
-        continue-on-error: true
-        run: ./xnu-build-arm64.sh --check
-
-      - name: Build kernel (DEVELOPMENT)
-        shell: bash
+      - name: Cek penanda tiap patch
         run: |
-          set -o pipefail
-          ./xnu-build-arm64.sh --force --config DEVELOPMENT --jobs 4 2>&1 | tee build.log
+          set -e
+          SRC=xnu-src-8020
+          check() {
+            if grep -q "$2" "$SRC/$1"; then
+              echo "  ok    $1 :: $2"
+            else
+              echo "  MISS  $1 :: $2"
+              exit 1
+            fi
+          }
+          echo "--- patch 0001: board config TISSOT ---"
+          test -f "$SRC/pexpert/pexpert/arm64/TISSOT.h"
+          check makedefs/MakeInc.def                 MACHINE_FLAGS_ARM64_TISSOT
+          check pexpert/pexpert/arm64/board_config.h ARM64_BOARD_CONFIG_TISSOT
+          echo "--- patch 0002: UART console ---"
+          check pexpert/pexpert/arm/protos.h         SERIAL_TISSOT_UART
+          check pexpert/arm/pe_serial.c              tissot_uart_init
+          echo "--- patch 0003: GICv2 ---"
+          check pexpert/pexpert/arm64/TISSOT.h       TISSOT_GIC_V2
+          check pexpert/arm/pe_fiq.c                 tissot_gic_init_distributor
+          check pexpert/arm/pe_fiq.c                 pe_gic_ack_irq
+          check osfmk/arm64/sleh.c                   pe_gic_ack_irq
+          echo ""
+          echo "Semua penanda patch ada."
 
-      - name: List build output
+      - name: Cek TISSOT tidak memakai arm64e (PAC)
+        run: |
+          # Cortex-A53 tidak punya Pointer Authentication. Kalau TISSOT masih
+          # dipetakan ke arm64e, kernel tidak akan jalan di Mi A1.
+          python3 - <<'PY'
+          import re, sys
+          src = open("xnu-src-8020/makedefs/MakeInc.def").read()
+          m = re.search(
+              r"ifneq\s*\(\$\(filter TISSOT,\$\(CURRENT_MACHINE_CONFIG\)\),\)\s*\n(.*?)\nelse",
+              src, re.S)
+          if not m:
+              sys.exit("GAGAL: blok TISSOT arm64/arm64e tidak ditemukan")
+          if "ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64" not in m.group(1):
+              sys.exit("GAGAL: TISSOT tidak di-set ke arm64 "
+                       "(masih arm64e -> PAC, A53 akan fault)")
+          print("ok: TISSOT -> arm64 (bukan arm64e)")
+          PY
+
+      - name: Cek -mcpu=cortex-a53
+        run: |
+          grep -E "MACHINE_FLAGS_ARM64_TISSOT[[:space:]]*=[[:space:]]*-DARM64_BOARD_CONFIG_TISSOT[[:space:]]+-mcpu=cortex-a53" \
+            xnu-src-8020/makedefs/MakeInc.def \
+            || { echo "GAGAL: MACHINE_FLAGS_ARM64_TISSOT bukan -mcpu=cortex-a53"; exit 1; }
+          echo "ok: -mcpu=cortex-a53"
+
+      - name: Cek pipeline image (tanpa compiler)
+        run: |
+          # DTB + kernel placeholder + boot image harus bisa dirakit murni
+          # dengan Python. Kalau ini gagal, job `package` juga akan gagal.
+          set -e
+          python3 tools/build_tissot_dtb.py
+          python3 tools/build_kernel_placeholder_arm64.py
+          python3 tools/make_tissot_bootimg.py --adt ""
+          echo "ok: boot image placeholder terpaket"
+
+          # ADT adalah data Apple (dari IPSW milik sendiri), TIDAK di-commit.
+          # Jadi langkah ADT hanya jalan kalau file-nya ada.
+          ADT=devices/tissot/dt/d22ap_15.6.1.adt
+          if [ -f "$ADT" ]; then
+            python3 tools/mkadt.py --template "$ADT" --tissot \
+              --out prebuilt/tissot.adt
+            python3 tools/make_tissot_bootimg.py
+            echo "ok: ADT + boot image lengkap"
+          else
+            echo "::notice::$ADT tidak ada di repo (data Apple tidak didistribusikan) — audit ADT dilewati. Jalankan devices/tissot/extract-dt.sh dari IPSW sendiri untuk mengaktifkannya."
+          fi
+
+      # Boot image placeholder sengaja diunggah: ini yang bisa dipakai untuk
+      # menguji jalur fastboot + ABL hari ini, tanpa menunggu build kernel
+      # berhasil. Isinya `wfi` spin loop, jadi tidak akan boot — tapi kalau
+      # ABL menolak imagenya, itu masalah packing, bukan masalah XNU.
+      - name: Upload boot image placeholder
+        uses: actions/upload-artifact@v4
+        with:
+          name: tissot-boot-placeholder
+          path: prebuilt/tissot-boot.img
+          if-no-files-found: warn
+          retention-days: 14
+
+  # --------------------------------------------------------------------------
+  # Job 2 — build kernel sungguhan
+  #
+  # Butuh macOS: clang + cctools + SDK Apple (lihat catatan di atas).
+  # --------------------------------------------------------------------------
+  kernel:
+    name: "Build kernel (macOS runner)"
+    runs-on: macos-latest
+    needs: patches
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache source XNU
+        uses: actions/cache@v4
+        with:
+          path: xnu-deps/build
+          key: xnu-src-${{ env.XNU_TAG }}-v1
+
+      # Toolchain di runner macOS selalu ada, tapi versinya berbeda-beda dan
+      # XNU 8020 (2021) lebih tua dari Xcode yang terpasang. Laporan ini yang
+      # membuat kegagalan build nanti bisa dibaca: kalau error-nya soal
+      # "-Wno-..." yang tidak dikenal clang baru, itu penyebabnya.
+      - name: Laporkan toolchain host
+        run: |
+          echo "host   : $(uname -a)"
+          echo "xcode  : $(xcodebuild -version | tr '\n' ' ')"
+          echo "clang  : $(clang --version | head -1)"
+          echo "sdk    : $(xcrun -sdk iphoneos -show-sdk-path 2>/dev/null || echo '-')"
+          echo ""
+          for t in clang ld ctf_insert kextsymboltool make python3; do
+            printf '%-16s %s\n' "$t" "$(command -v "$t" 2>/dev/null || echo MISSING)"
+          done
+          echo ""
+          echo "--- ld versi ---"
+          ld -v 2>&1 | head -3 || true
+          echo "--- SDK iPhoneOS ---"
+          xcrun -sdk iphoneos -show-sdk-version 2>/dev/null || true
+
+      - name: Siapkan source + patch
+        run: |
+          chmod +x xnu/apply-8020.sh xnu-build-arm64.sh
+          ./xnu/apply-8020.sh
+
+      # Build dibuat tidak menggagalkan job di sini, supaya langkah ringkasan
+      # dan upload artefak di bawah tetap jalan. Status akhirnya ditentukan
+      # oleh langkah "Nilai hasil build" di paling bawah.
+      - name: Build kernel (ARM64 TISSOT)
+        id: build
+        continue-on-error: true
+        run: |
+          CONFIG="${{ github.event.inputs.config || 'DEVELOPMENT' }}"
+          echo "config=$CONFIG" >> "$GITHUB_ENV"
+          set +e
+          ./xnu-build-arm64.sh --force --config "$CONFIG" --jobs 4 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+
+          # XNU 8020 (2021) + clang yang jauh lebih baru: warning baru otomatis
+          # jadi error karena WERROR := -Werror, dan error aslinya tertutup.
+          # Percobaan kedua tanpa WERROR memisahkan keduanya. Build-nya
+          # inkremental, jadi ini tidak mengulang pekerjaan yang sudah selesai.
+          if [ "$rc" -ne 0 ] && grep -q -- "-Werror" build.log; then
+            echo ""
+            echo "================================================================"
+            echo ">>> gagal dengan -Werror — mengulang dengan WERROR= (tanpa -Werror)"
+            echo "================================================================"
+            ./xnu-build-arm64.sh --force --config "$CONFIG" --jobs 4 --no-werror 2>&1 | tee -a build.log
+            rc=${PIPESTATUS[0]}
+          fi
+
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo ">>> exit code: $rc"
+          exit 0
+
+      - name: Cari kernel hasil build
+        id: find
         if: always()
         run: |
           echo "--- BUILD/obj ---"
-          find xnu-src-8020/BUILD -maxdepth 2 -type f -name 'kernel.*' 2>/dev/null || true
-          ls -la prebuilt 2>/dev/null || true
+          find xnu-src-8020/BUILD -maxdepth 3 -type f \( -name 'kernel.*' -o -name '*.dSYM' \) 2>/dev/null || true
+          K="$(find xnu-src-8020/BUILD -type f -name 'kernel.*' 2>/dev/null | head -1)"
+          if [ -n "$K" ]; then
+            echo "found=$K"
+            echo "found=$K" >> "$GITHUB_OUTPUT"
+            ls -l "$K"
+            file "$K" || true
+            mkdir -p prebuilt
+            cp "$K" prebuilt/tissot-kernel-arm64.Image
+            gzip -9 -c "$K" > prebuilt/tissot-kernel-arm64.Image.gz
+            echo "size=$(wc -c < "$K")" >> "$GITHUB_OUTPUT"
+          else
+            echo "kernel.* tidak ditemukan"
+          fi
 
-      - name: Upload build log
+      - name: 40 error pertama
+        if: always()
+        run: |
+          echo "=== error: ==="
+          grep -n -i -m 40 "error:" build.log 2>/dev/null || echo "(tidak ada 'error:' di log)"
+          echo ""
+          echo "=== 30 baris terakhir ==="
+          tail -30 build.log 2>/dev/null || true
+
+      - name: Ringkasan job
+        if: always()
+        run: |
+          {
+            echo "## XNU 8020 → Mi A1 (tissot)"
+            echo ""
+            echo "| Item | Nilai |"
+            echo "|------|-------|"
+            echo "| config | \`${{ github.event.inputs.config || 'DEVELOPMENT' }}\` |"
+            echo "| target | ARM64 / TISSOT / Cortex-A53 |"
+            echo "| exit code build | \`${{ steps.build.outputs.rc }}\` |"
+            echo "| kernel | \`${{ steps.find.outputs.found || 'tidak ada' }}\` |"
+            if [ -n "${{ steps.find.outputs.size }}" ]; then
+              echo "| ukuran kernel | ${{ steps.find.outputs.size }} byte |"
+            fi
+            echo ""
+            echo "Log lengkap ada di artefak \`build-log\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload log build
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -76,13 +310,103 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload kernel artifact
+      - name: Upload kernel
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xnu-tissot-kernel
           path: |
             prebuilt/tissot-kernel-arm64.Image
-            xnu-src-8020/BUILD/obj/**/kernel.*
+            prebuilt/tissot-kernel-arm64.Image.gz
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Nilai hasil build
+        run: |
+          rc="${{ steps.build.outputs.rc }}"
+          if [ "$rc" != "0" ]; then
+            echo "::error::Build kernel gagal (exit $rc). Lihat artefak build-log."
+            exit 1
+          fi
+          if [ -z "${{ steps.find.outputs.found }}" ]; then
+            echo "::error::Build sukses tapi kernel.* tidak ditemukan."
+            exit 1
+          fi
+          echo "Build OK."
+
+  # --------------------------------------------------------------------------
+  # Job 3 — rakit boot image dari kernel hasil job 2
+  #
+  # Murni Python (mkadt + dtb + mkbootimg), jadi cukup Linux.
+  # --------------------------------------------------------------------------
+  package:
+    name: "Rakit boot image (Linux)"
+    runs-on: ubuntu-latest
+    needs: kernel
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.pack }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ambil kernel hasil build
+        uses: actions/download-artifact@v4
+        with:
+          name: xnu-tissot-kernel
+          path: prebuilt
+
+      - name: Pasang kernel + rakit boot image
+        run: |
+          set -e
+          ls -l prebuilt
+          if [ ! -f prebuilt/tissot-kernel-arm64.Image ]; then
+            echo "::error::Kernel hasil build tidak ada di artefak."
+            exit 1
+          fi
+          python3 tools/build_tissot_dtb.py
+
+          # ADT = data Apple dari IPSW sendiri; tidak di-commit ke repo.
+          ADT=devices/tissot/dt/d22ap_15.6.1.adt
+          if [ -f "$ADT" ]; then
+            python3 tools/mkadt.py --template "$ADT" --tissot \
+              --out prebuilt/tissot.adt
+            echo "ADT: dirakit dari $ADT"
+          else
+            echo "::warning::ADT tidak ada — boot image dibuat TANPA device tree, jadi belum bisa di-boot XNU."
+          fi
+
+          # Kernel XNU adalah Mach-O, bukan arm64 Image, jadi butuh flag ini.
+          python3 tools/make_tissot_bootimg.py --allow-foreign-kernel
+
+      - name: Ringkasan boot image
+        run: |
+          {
+            echo ""
+            echo "### Boot image"
+            echo ""
+            if [ -f prebuilt/tissot-boot.img ]; then
+              echo "- \`prebuilt/tissot-boot.img\` — $(wc -c < prebuilt/tissot-boot.img) byte"
+            else
+              echo "- **gagal dirakit**"
+            fi
+            if [ -f prebuilt/tissot.adt ]; then
+              echo "- ADT: $(wc -c < prebuilt/tissot.adt) byte (tertanam)"
+            else
+              echo "- ADT: **tidak ada** — image belum bisa boot"
+            fi
+            echo ""
+            echo "> Kernel di dalamnya masih Mach-O. ABL melompat ke offset 0"
+            echo "> payload, dan header Mach-O bukan kode — jadi flashing sekarang"
+            echo "> belum akan boot. Itu tugas SHIM berikutnya."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload boot image
+        uses: actions/upload-artifact@v4
+        with:
+          name: tissot-boot
+          path: |
+            prebuilt/tissot-boot.img
+            prebuilt/tissot.adt
+            prebuilt/tissot.dtb
+          retention-days: 30

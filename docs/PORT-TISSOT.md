@@ -1,9 +1,10 @@
 # Port iOS ke Xiaomi Mi A1 (codename: tissot)
 
-Panduan ini mencatat upaya memport iOS 16.7.16 (iPhone X) ke **Xiaomi Mi A1**
-melalui jalur **ios-sweet** — yaitu menjalankan XNU + user space iOS **native** di
-atas SoC ARM64 (bukan emulasi). Ini berbeda dari HakiOS-x86 (target PC x86_64);
-tissot adalah target ARM, jadi binary iOS ARM64 jalan langsung di CPU.
+Panduan ini mencatat upaya memport iOS ke **Xiaomi Mi A1** melalui jalur
+**ios-sweet** — yaitu menjalankan XNU + user space iOS **native** di atas SoC
+ARM64 (bukan emulasi). Basis yang dipakai **iOS 15.6.1 (19G82)**, bukan iOS 16,
+karena userland `arm64` iOS 15 masih harus jalan di A9 (ARMv8.0) sehingga cocok
+untuk Cortex-A53; lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 
 > **Status (diperbarui):** **Pipeline build sudah jadi & terverifikasi.**
 > `make-tissot.bat` / `make tissot` menghasilkan `prebuilt/tissot-boot.img` —
@@ -33,9 +34,9 @@ tissot adalah target ARM, jadi binary iOS ARM64 jalan langsung di CPU.
 | Bootloader | Unlockable via Xiaomi Mi Unlock (ada masa tunggu) |
 | Rilis | 2017 |
 
-Keuntungan: ARM‑on‑ARM → iOS ARM64 jalan native (cepat, tidak seperti emulasi
-x86). Cortex‑A53 **tidak punya PAC** (Pointer Authentication) — sama seperti
-iPhone X, jadi "gate" PAC yang dibicarakan ios‑sweet sudah terpenuhi.
+Keuntungan: ARM‑on‑ARM → iOS ARM64 jalan native (cepat). Cortex‑A53 **tidak
+punya PAC** (Pointer Authentication) — sama seperti iPhone X, jadi "gate" PAC
+yang dibicarakan ios‑sweet sudah terpenuhi.
 
 ---
 
@@ -44,7 +45,7 @@ iPhone X, jadi "gate" PAC yang dibicarakan ios‑sweet sudah terpenuhi.
 - **Mi A1 fisik** dengan bootloader **ter-unlock** (proses Mi Unlock menghapus
   semua data — backup dulu).
 - PC dengan `adb` + `fastboot` (platform‑tools).
-- **iOS 16.7.16 IPSW iPhone X (iPhone10,3 / `d22ap`)** — dari punyamu sendiri
+- **iOS 15.6.1 (19G82) IPSW iPhone X (iPhone10,3 / `d22ap`)** — dari punyamu sendiri
   (Apple CDN / ipsw.me). Tidak didistribusikan.
 - Referensi kode: `dipa-studio/ios-sweet` dan port turunannya (`ios-topaz` /
   `UniXNU`). Pelajari tools mereka — `devices/tissot/` di sini meniru polanya.
@@ -79,12 +80,12 @@ fastboot oem unlock   # (atau token dari Mi Unlock; masa tunggu bisa hari)
 > Bootloader ter-unlock **menghapus data** dan bisa membatalkan garansi.
 
 ### 4.2 Siapkan iOS root (reuse step 2 dari ios‑sweet)
-Gunakan `mkiosroot.sh` untuk merakit `ios16-root.img` dari IPSW iPhone X:
+Gunakan `mkiosroot.sh` untuk merakit `ios15-root.img` dari IPSW iPhone X:
 ```bash
 # (dari repo ios-sweet)
-tools/mkiosroot.sh OS.dmg SystemOS.dmg AppOS.dmg ios16-root.img 16G
-sudo fsck.hfsplus -fy ios16-root.img
-# mount, jalankan sweet-root-tweaks.py, unmount, img2simg -> ios16-root.simg
+tools/mkiosroot.sh OS.dmg SystemOS.dmg AppOS.dmg ios15-root.img 16G
+sudo fsck.hfsplus -fy ios15-root.img
+# mount, jalankan sweet-root-tweaks.py, unmount, img2simg -> ios15-root.simg
 ```
 Root ini **ARM64 native** → berlaku untuk tissot maupun device ARM lain.
 
@@ -128,7 +129,7 @@ Kalau sudah punya **XNU ARM64 asli**, tinggal lewatkan:
 ```bash
 ./devices/tissot/build-bootimage.sh \
     --kernel path/ke/xnu-arm64.Image \
-    --ramdisk path/ke/ios16-root.simg \
+    --ramdisk path/ke/ios15-root.simg \
     --dtb devices/tissot/dt/d22ap.dtb \
     --out devices/tissot/tissot-ios-boot.img
 ```
@@ -147,11 +148,14 @@ fastboot boot tissot-ios-boot.img     # coba boot tanpa flash dulu
 ### 4.6 Driver bring‑up MSM8953
 Ini bagian tersulit. Karena XNU "dibohongi" pakai DT iPhone X, kamu harus
 memetakan/pasang driver XNU untuk periferal MSM8953 sungguhan:
-- **UART (serial)** dulu — untuk lihat log boot XNU.
+- **UART (serial)** dulu — untuk lihat log boot XNU. Ini sudah dikerjakan:
+  patch 0002 menambahkan driver `ttyHSL0` di `pexpert/arm/pe_serial.c`
+  (lihat `xnu/patches-8020/0002-tissot-uart-console.patch`).
+- **Interrupt controller** — patch 0003 menambahkan driver GICv2 (GIC-400)
+  di `pexpert/arm/pe_fiq.c`. Tanpa itu kernel hang setelah beberapa baris UART.
 - **Display** (panel Mi A1) + **touch** (synaptics/Goodix).
 - Clock/reset, GPIO, regulator — biasanya lewat DT/ACPI mapping.
-Lihat `xnu/files/bsd/dev/hakios.*.c` sebagai referensi pola driver (meski itu
-untuk x86 q35, strukturnya bisa dijadikan template).
+  Belum ada driver display/touch; itu pekerjaan setelah kernel bisa boot.
 
 ### 4.7 First boot & serial
 Sambungkan serial/USB‑serial ke Mi A1, buka `screen`/`PuTTY` 115200 8N1, lalu
@@ -168,7 +172,7 @@ SpringBoard di layar.
 - [x] IPSW iPhone X 16.7.16 (20H392) tersedia — disimpan sebagai referensi
 - [ ] IPSW iPhone X **15.6.1 (19G82)** di‑download — basis port untuk ARMv8.0
       (lihat `IOS15-VS-IOS16-ARMv8.md`)
-- [ ] `ios16-root.img` / `.simg` rakit via mkiosroot.sh
+- [ ] `ios15-root.img` / `.simg` rakit via mkiosroot.sh
 - [ ] `d22ap.dtb` diekstrak dari IPSW
 - [ ] XNU ARM64 asli dibangun → ganti `tissot-kernel-arm64.Image`
 - [ ] Driver UART MSM8953 jalan (serial log keluar)
@@ -179,12 +183,11 @@ SpringBoard di layar.
 
 ## 6. Risiko utama (baca sebelum buang waktu)
 
-1. **ARMv8.0 vs ARMv8.2 (RISIKO TERBESAR).** Setiap port iOS 16 yang dikonfirmasi
-   jalan di SoC **ARMv8.2‑class** (SD685/7150/8 Gen 2). MSM8953 Cortex‑A53 adalah
-   **ARMv8.0** (2017). XNU / dyld shared cache iOS 16 kemungkinan memakai instruksi
-   ARMv8.1/8.2 (atomics, FP16, …) yang akan **illegal instruction / fault** di
-   A53. **Verifikasi dulu** apakah iOS 16 butuh ARMv8.1+ sebelum lanjut — ini
-   bisa jadi penentu layak/tidaknya port.
+1. **ARMv8.0 vs ARMv8.2 (risiko yang sudah dimitigasi).** Port iOS 16 yang
+   dikonfirmasi jalan semuanya di SoC **ARMv8.2-class** (SD685/7150/8 Gen 2),
+   sedangkan MSM8953 Cortex-A53 adalah **ARMv8.0** (2017). XNU / dyld shared
+   cache iOS 16 bisa memakai instruksi ARMv8.1/8.2 (atomics, FP16, ...) yang
+   akan **illegal instruction / fault** di A53.
 
    > ✅ **Solusi: pakai iOS 15, bukan 16.** iOS 15 masih mendukung iPhone 6s
    > (A9 = **ARMv8.0**), jadi seluruh userland `arm64` iOS 15 wajib kompatibel
@@ -206,5 +209,6 @@ SpringBoard di layar.
 - `ios-topaz` — port ke Redmi Note 12 4G (SD685)
 - `UniXNU` — port ke Xiaomi Pad 6S Pro (SD8 Gen 2, iPadOS)
 - `devices/tissot/` — scaffold profile untuk device ini
-- `docs/IOS-EMULATION.md` — konteks emulasi (kalau mau x86)
-- `docs/BOOT-GUIDE.md` — konteks HakiOS-x86 (x86_64 PC)
+- `docs/XNU8020-PORT-PLAN.md` — status & rencana port XNU 8020 ke tissot
+- `docs/IOS15-VS-IOS16-ARMv8.md` — kenapa iOS 15, bukan 16
+- `docs/INSTALL-STEP-BY-STEP.md` — panduan langkah demi langkah A–H

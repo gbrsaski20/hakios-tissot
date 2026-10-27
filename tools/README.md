@@ -1,39 +1,98 @@
-# HakiOS-x86 Tools
+# tools/ — Xiaomi Mi A1 (`tissot`)
 
-## Available tools
+Semua tool di sini **Python murni**. Tidak butuh compiler, `mkbootimg`, `dtc`,
+WSL, atau macOS. Yang butuh macOS hanya build kernel XNU itu sendiri
+(`xnu-build-arm64.sh`, dijalankan di CI).
 
-| Script | Purpose |
-|--------|---------|
-| `make-esp.sh` | Create a FAT32 ESP disk image for QEMU |
-| `make-boot-usb.sh` | Create a bootable USB drive for real PC |
+| Script | Fungsi |
+|--------|--------|
+| `mkadt.py` | **Apple Device Tree** — parse/serialize/edit format DT milik Apple (bukan FDT), plus preset `--tissot` dan audit syarat XNU |
+| `extract_adt.py` | Ambil `DeviceTree.d22ap.im4p` dari IPSW iOS 15.6.1 lalu decompress LZFSE |
+| `build_tissot_dtb.py` | FDT Linux MSM8953 (referensi alamat register, dipakai sebagai appended DTB) |
+| `make_tissot_bootimg.py` | Packer Android boot image v0 (kernel + ramdisk + DTB + ADT) dengan verifikasi |
+| `build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (`wfi` spin loop) untuk menguji pipeline tanpa build XNU |
 
-## make-esp.sh
+## Alur
 
-```bash
-# Create an ESP image for QEMU
-make-esp.sh devices/pc-q35/esp.img prebuilt/xnuloader.efi prebuilt/mach.development.x86_64
+```
+IPSW iOS 15.6.1
+   │  extract_adt.py
+   ▼
+DeviceTree.d22ap.im4p → d22ap_15.6.1.adt
+   │  mkadt.py --tissot          (override MSM8953 + audit 12 cek)
+   ▼
+prebuilt/tissot.adt
 
-# With custom command line
-make-esp.sh esp.img xnuloader.efi mach_kernel "cpus=4 display=1 disk=1"
+build_tissot_dtb.py ──► prebuilt/tissot.dtb
+build_kernel_placeholder_arm64.py ──► prebuilt/tissot-kernel-arm64.Image
+   │
+   ▼  make_tissot_bootimg.py
+prebuilt/tissot-boot.img   ← fastboot boot
 ```
 
-## make-boot-usb.sh
+## mkadt.py
+
+XNU **tidak** memakai FDT Linux. Ia memakai format Device Tree milik Apple
+(`struct DeviceTreeNode`, little-endian, lihat `pexpert/pexpert/device_tree.h`).
 
 ```bash
-# Create a bootable USB drive
-# WARNING: DESTROYS all data on the target device!
-sudo tools/make-boot-usb.sh /dev/sdb
+# lihat isi ADT asli
+python tools/mkadt.py --template devices/tissot/dt/d22ap_15.6.1.adt --info
+
+# buktikan writer-nya benar (parse -> tulis ulang harus byte-identik)
+python tools/mkadt.py --template devices/tissot/dt/d22ap_15.6.1.adt --roundtrip
+
+# rakit ADT tissot + audit syarat XNU
+python tools/mkadt.py --template devices/tissot/dt/d22ap_15.6.1.adt \
+                       --tissot --out prebuilt/tissot.adt
 ```
 
-## Other utilities
+Yang ditimpa preset `--tissot`:
 
-### Building APFS images
+| Node | Jadi | Dipakai oleh |
+|------|------|--------------|
+| `/arm-io:ranges` | parent `0x07800000` | `pe_arm_get_soc_base_phys()` |
+| `/arm-io/serial:reg` | `0xAF000` → phys `0x78AF000` | `serial_init()` |
+| `/arm-io/aic` → `/arm-io/gic` | GICD `0x0B000000`, GICC `0x0B002000` | `pe_init_fiq()` (GICv2) |
+| `/arm-io/aic-timebase` → `/arm-io/gic-timebase` | `device_type=timer` | `pe_arm_map_interrupt_controller()` |
+| `/cpus/cpuN:*frequency*` | 19,2 MHz dst | `pe_identify_machine()` |
+| `/memory:reg` | `0x80000000` + 4 GiB | `arm_vm_init()` |
 
-The `userland/build.sh` script handles APFS image creation. It uses:
-- `mkfs.apfs` (from apfsprogs or similar)
-- `apfs-fuse` for mounting (optional)
+Dua hal yang mudah salah dan sudah ditangani:
 
-### IPSW fetching
+1. **Node AIC harus dihapus.** `SecureDTFindEntry` itu *first-match*, jadi kalau
+   AIC Apple masih ada XNU akan memetakan register AIC di `0x32100000`.
+2. **Frekuensi `/cpus` harus diisi.** ADT iPhone X melaporkan `0` untuk semua
+   frekuensi, dan `timebase-frequency = 0` membuat `bus_to_dec_rate_den`
+   membagi nol di `pe_identify_machine.c:177`.
 
-The `sysimage/fetch.sh` script downloads the iOS 16.5 IPSW from
-Apple's public servers and extracts the needed files.
+Audit di akhir keluaran (`XNU 8020 requirement audit`) mencetak 12 cek; script
+keluar dengan kode 1 kalau ada yang gagal.
+
+## make_tissot_bootimg.py
+
+```bash
+python tools/make_tissot_bootimg.py
+python tools/make_tissot_bootimg.py --kernel X --dtb Y --adt Z --out W
+python tools/make_tissot_bootimg.py --kernel-format raw
+python tools/make_tissot_bootimg.py --adt ""            # tanpa ADT
+python tools/make_tissot_bootimg.py --allow-foreign-kernel
+```
+
+Format default `gz-dtb` = `gzip(Image) + DTB` sebagai satu payload, sama
+seperti `boot.img` stock tissot (`BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb`).
+Mode `raw` menaruh Image apa adanya dan DTB sebagai section terpisah.
+
+ADT Apple ditambahkan sebagai section ke-4 (ekstensi kita). Alamat fisiknya
+dicetak — itulah nilai untuk `boot_args.deviceTreeP` yang harus diisi SHIM.
+Kalau file ADT tidak ada, section itu dilewati (dengan pesan), bukan gagal.
+
+`--allow-foreign-kernel` menerima payload yang bukan arm64 Image — dipakai CI
+untuk mengemas kernel XNU hasil build, yang berupa **Mach-O**. Tanpa flag itu
+Mach-O ditolak, karena memang tidak bisa di-boot: ABL melompat ke offset 0
+payload dan header Mach-O bukan kode. Itu urusan SHIM.
+
+Setelah menulis, script mem-parse ulang image-nya sendiri dan memverifikasi:
+magic `ANDROID!`, SHA-1 header, magic `ARM\x64` di kernel (atau Mach-O kalau
+flag di atas dipakai), magic FDT di DTB, gzip di ramdisk, dan ADT
+**byte-identik** dengan sumbernya.

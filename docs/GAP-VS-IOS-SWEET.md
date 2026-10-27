@@ -11,13 +11,13 @@ ada, apa yang belum, dan mana yang benar-benar menghalangi.
 
 ## 1. Verifikasi IPSW (sudah dilakukan)
 
-IPSW: `iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw`
+IPSW: `iPhone10,3,iPhone10,6_15.6.1_19G82_Restore.ipsw`
 
 | Item | Hasil |
 |------|-------|
 | Ukuran | 5,75 GiB |
 | Jumlah entry | 91 |
-| Build | **16.7.16 / 20H392** — sama persis dengan yang dipakai ios-sweet ✅ |
+| Build | **15.6.1 / 19G82** — sengaja beda dari ios-sweet (mereka 16.7.16); alasan di `docs/IOS15-VS-IOS16-ARMv8.md` |
 | Device tree | `Firmware/all_flash/DeviceTree.d22ap.im4p` (33.719 B) ✅ |
 | Device tree lain | `Firmware/all_flash/DeviceTree.d221ap.im4p` (varian iPhone 8 Plus) |
 | IM4P type | `dtre`, desc `EmbeddedDeviceTrees-7153.140.37.700.2` |
@@ -33,7 +33,7 @@ SEQ { IA5 "IM4P", IA5 "dtre", IA5 "<desc>", OCT <payload>, SEQ{INT,INT} }
 Ekstraksi ulang kapan saja dengan:
 
 ```bash
-python tools/extract_adt.py "F:\SETUP\iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+python tools/extract_adt.py "F:\SETUP\iPhone10,3,iPhone10,6_15.6.1_19G82_Restore.ipsw"
 ```
 
 Payload masih LZFSE; untuk men-decompress pakai `pip install lzfse` (script
@@ -168,7 +168,7 @@ investasi besar.
 
 ## 8. Checklist
 
-- [x] IPSW iPhone X 16.7.16 (20H392) tersedia & terverifikasi
+- [x] IPSW iPhone X 15.6.1 (19G82) tersedia & terverifikasi
 - [x] DeviceTree `d22ap.im4p` berhasil diekstrak dari IPSW
 - [x] Nilai hardware asli tissot (board-id, UART console, touch, base/pagesize,
       format kernel `Image.gz-dtb`) diambil dari device tree LineageOS

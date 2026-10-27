@@ -1,0 +1,46 @@
+# ============================================================================
+# .gitattributes — HakiOS / tissot
+#
+# Kenapa ini penting: kernel di-build di runner Linux/macOS (GitHub Actions).
+# Kalau sebuah skrip .sh tersimpan dengan CRLF di git, `bash script.sh` di
+# runner akan gagal dengan pesan aneh seperti:
+#     $'\r': command not found
+# karena shebang-nya jadi "#!/bin/bash\r".
+#
+# Jadi: semua yang dieksekusi di Linux/macOS dipaksa LF, dan hanya berkas
+# Windows asli (.bat/.cmd/.ps1) yang CRLF.
+# ============================================================================
+
+# Default: teks, biar git yang menormalkan
+* text=auto
+
+# --- Wajib LF: dieksekusi/dibaca di runner Linux & macOS --------------------
+*.sh            text eol=lf
+*.py            text eol=lf
+Makefile        text eol=lf
+*.mk            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.patch         text eol=lf
+*.dts           text eol=lf
+*.c             text eol=lf
+*.h             text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# --- Wajib CRLF: hanya untuk Windows ---------------------------------------
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# --- Biner: jangan disentuh ------------------------------------------------
+*.img           binary
+*.Image         binary
+*.adt           binary
+*.dtb           binary
+*.im4p          binary
+*.lzfse         binary
+*.ipsw          binary
+*.tgz           binary
+*.simg          binary
+*.cpio.gz       binary

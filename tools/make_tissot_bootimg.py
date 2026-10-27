@@ -96,7 +96,7 @@ INIT_SCRIPT = b"""#!/system/bin/sh
 #
 # This ramdisk exists so the boot image is structurally complete.
 # When booting a real XNU kernel this is replaced by the iOS root
-# (sysimage/ios16-root.simg, see docs/PORT-TISSOT.md 4.2).
+# (see docs/PORT-TISSOT.md section D3: mkiosroot.sh output, an HFS+ image).
 echo "hakios: tissot ramdisk init reached"
 exec /bin/sh
 """
@@ -246,12 +246,19 @@ def pack_bootimg(kernel, ramdisk, dtb, second=b"", adt=b"",
 # ---------------------------------------------------------------------------
 # verify: re-parse the produced image
 # ---------------------------------------------------------------------------
-def verify_bootimg(data, page_size=PAGE_SIZE, adt_len=0, adt_expected=b""):
+def verify_bootimg(data, page_size=PAGE_SIZE, adt_len=0, adt_expected=b"",
+                   allow_foreign_kernel=False):
     """Re-parse a packed image and check every structure.
 
     adt_len/adt_expected: when the caller embedded an Apple Device Tree, pass
     its length and bytes so the ADT section is verified byte-for-byte instead
     of just being reported as "whatever is left in the file".
+
+    allow_foreign_kernel: a real XNU kernel is a *Mach-O* file, not a Linux
+    arm64 Image, so it has no `ARM\\x64` magic. Without this flag that is a
+    hard error (the packer is meant to produce bootable images). With it, a
+    Mach-O payload is reported as a warning instead — used by CI to package
+    the freshly built XNU kernel before the SHIM exists.
     """
     msgs = []
     ok = True
@@ -402,9 +409,31 @@ def verify_bootimg(data, page_size=PAGE_SIZE, adt_len=0, adt_expected=b""):
 
     # Verify the kernel (decompressed if it was gz) is a valid arm64 Image
     msgs.append("")
-    if len(raw_img) >= 64 and struct.unpack("<I", raw_img[56:60])[0] == 0x644D5241:
+    arm64_magic = (len(raw_img) >= 64 and
+                   struct.unpack("<I", raw_img[56:60])[0] == 0x644D5241)
+    # Mach-O: MH_MAGIC_64 0xfeedfacf, MH_CIGAM_64 0xcffaedfe, MH_MAGIC 0xfeedface
+    mach_o_magic = (len(raw_img) >= 4 and
+                    struct.unpack("<I", raw_img[:4])[0]
+                    in (0xFEEDFACF, 0xCFFAEDFE, 0xFEEDFACE, 0xCEFAEDFE))
+
+    if arm64_magic:
         msgs.append(f"kernel check    = arm64 Image magic 'ARM\\x64' OK "
                     f"({kernel_kind}, {len(raw_img)} bytes)")
+    elif mach_o_magic:
+        # A real XNU kernel. Legitimate to pack, but ABL jumps to offset 0 of
+        # the loaded kernel and a Mach-O header is not executable code, so it
+        # cannot boot until the SHIM relocates it.
+        msg = (f"kernel check    = Mach-O (XNU), bukan arm64 Image "
+               f"[{kernel_kind}]")
+        if allow_foreign_kernel:
+            msgs.append(msg + " — diterima (--allow-foreign-kernel)")
+            msgs.append("                  PERINGATAN: Mach-O tidak bisa "
+                        "di-boot tanpa SHIM.")
+        else:
+            ok = False
+            msgs.append(msg)
+            msgs.append("                  Tambahkan --allow-foreign-kernel "
+                        "kalau ini memang kernel XNU.")
     else:
         ok = False
         msgs.append(f"kernel check    = BAD (missing ARM\\x64 magic) [{kernel_kind}]")
@@ -457,6 +486,10 @@ def main(argv=None):
     ap.add_argument("--kernel-format", choices=("gz-dtb", "raw"), default="gz-dtb",
                     help="kernel payload layout (default: gz-dtb = Image.gz + "
                          "appended DTB, matching stock tissot boot.img)")
+    ap.add_argument("--allow-foreign-kernel", action="store_true",
+                    help="terima kernel yang bukan arm64 Image (mis. Mach-O "
+                         "XNU hasil build). Hasilnya BELUM bisa di-boot tanpa "
+                         "SHIM, tapi berguna untuk mengemas artefak CI.")
     args = ap.parse_args(argv)
 
     print("=" * 62)
@@ -564,7 +597,8 @@ def main(argv=None):
     # ---- verify (includes a byte-for-byte check of the embedded ADT) ----
     ok, msgs = verify_bootimg(img, page_size=args.page_size,
                               adt_len=len(adt) if adt else 0,
-                              adt_expected=adt)
+                              adt_expected=adt,
+                              allow_foreign_kernel=args.allow_foreign_kernel)
     print("  Verification (re-parse of packed image):")
     for m in msgs:
         print(f"    {m}" if m else "")
@@ -587,11 +621,15 @@ def main(argv=None):
     print("      -> try without flashing; if it boots, make it permanent:")
     print(f"    fastboot flash boot {os.path.relpath(args.out, root_dir)}")
     print()
-    print("  NOTE: the kernel inside is a PLACEHOLDER (wfi spin loop).")
-    print("  A real XNU ARM64 kernel needs cctools + macOS SDK, and the")
-    print("  MSM8953 (ARMv8.0) vs iOS 16 (ARMv8.2) risk in")
-    print("  docs/PORT-TISSOT.md section 6 still applies.")
-    print()
+    is_macho = (len(kernel) >= 4 and
+                struct.unpack("<I", kernel[:4])[0]
+                in (0xFEEDFACF, 0xCFFAEDFE, 0xFEEDFACE, 0xCEFAEDFE))
+    if not is_macho and len(kernel) < 1024 * 1024:
+        print("  NOTE: kernel kecil dan bukan Mach-O — kemungkinan masih")
+        print("  PLACEHOLDER (wfi spin loop). Kernel XNU asli butuh cctools +")
+        print("  SDK Apple di mesin build (macOS); targetnya tetap Mi A1.")
+        print("  Lihat docs/IOS15-VS-IOS16-ARMv8.md untuk alasan iOS 15.")
+        print()
     return 0
 
 

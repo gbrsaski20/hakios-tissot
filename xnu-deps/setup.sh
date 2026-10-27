@@ -69,7 +69,7 @@ if [ ! -d "$SDK_DIR" ]; then
     echo ">>> macOS SDK headers are needed for XNU build."
     echo ">>> Option 1: On a Mac, run 'xcrun --show-sdk-path' and copy the SDK."
     echo ">>> Option 2: Use the theos SDK (https://github.com/theos/sdks)."
-    echo ">>> Option 3: The SDK is fetched automatically by xnu/apply.sh."
+    echo ">>> Option 3: The SDK is fetched automatically by xnu/apply-8020.sh."
     echo ""
     echo ">>> For the open build (no iOS user space), the bare SDK is sufficient."
 fi
@@ -81,4 +81,5 @@ if [ "$MISSING" = "1" ]; then
 fi
 
 echo ">>> All dependencies present."
-echo ">>> Next: run 'make x86-open' to build the open kernel."
+echo ">>> Next: run 'make tissot' for the boot image, or 'make xnu8020' on macOS"
+echo ">>>       to build the real XNU kernel for Xiaomi Mi A1 (tissot)."

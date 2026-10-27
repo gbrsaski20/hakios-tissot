@@ -6,9 +6,7 @@ Port ini membangun XNU dari source Apple (`xnu-8020`, generasi iOS 15) lalu
 mem-boot-nya di SoC Qualcomm MSM8953 milik Mi A1, dengan user space iOS 15
 sebagai root.
 
-> ⚠️ **Repo ini punya dua jalur.** Yang **aktif** adalah **Mi A1 (ARM64)**.
-> Jalur **x86_64** di bagian bawah adalah fase pertama proyek dan **tidak
-> dipakai** untuk Mi A1 — lihat [Jalur lama](#jalur-lama-x86_64-fase-1-tidak-dipakai-untuk-mi-a1).
+> Repo ini **hanya** menargetkan Mi A1. Tidak ada jalur x86_64 di sini.
 
 ---
 
@@ -36,32 +34,50 @@ perangkat arm64 **tertua** yang didukung versi itu:
 iOS 16 membuang A9, sehingga bebas memakai instruksi ARMv8.1/8.2. Karena itu
 basis port ini **iOS 15.6.1 (19G82)**. Detail: `docs/IOS15-VS-IOS16-ARMv8.md`.
 
+## Soal macOS — itu mesin build, bukan target
+
+Kalau kamu lihat "butuh macOS" di dokumentasi, itu **bukan** berarti targetnya
+macOS. Targetnya tetap Mi A1 (ARM64 Android).
+
+XNU adalah kernel Apple. Build system-nya butuh **clang + cctools** (`ld` yang
+paham Mach-O, `ctf_insert`, `kextsymboltool`) **+ SDK Apple**, dan makefile-nya
+berasumsi userland BSD/macOS. Itu persyaratan **host**, dan tidak berubah
+berapa pun targetnya. Proyek pembanding `dipa-studio/ios-sweet` juga membangun
+kernelnya di GitHub Actions runner **macOS**.
+
+Yang penting: **kamu tidak perlu punya Mac.** Repo publik dapat menit macOS
+gratis di GitHub Actions — `.github/workflows/xnu-tissot.yml` melakukannya
+otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
+
 ## Status
 
 | Komponen | Status |
 |----------|--------|
-| Source `xnu-8020.140.41` + board config `TISSOT` | ✅ |
-| Patch UART console (draft) | ✅ apply teruji, compile TBD |
-| Apple Device Tree (`mkadt.py`) | ✅ round-trip byte-identik |
-| Boot image Android (v0, `Image.gz-dtb`) | ✅ valid & self-verifying |
-| Build kernel di CI (macOS runner) | ⏳ sedang berjalan |
-| `mkpayload.py`, `shim/`, `mkiosroot.sh` | ❌ belum |
+| Source `xnu-8020.140.41` + board config `TISSOT` (patch 0001) | ✅ apply teruji |
+| Driver UART console `ttyHSL0` (patch 0002) | ✅ apply teruji, compile TBD |
+| Driver **GICv2 GIC-400** + ack/EOI MMIO (patch 0003) | ✅ apply teruji, compile TBD |
+| Apple Device Tree (`mkadt.py`) | ✅ round-trip byte-identik, audit 12/12 |
+| Boot image Android (v0, `Image.gz-dtb` + ADT ter-embed) | ✅ valid & self-verifying |
+| Build kernel di CI (macOS runner) | ⏳ workflow siap (3 job), belum pernah jalan |
+| `shim/`, `mkpayload.py` | ❌ belum — **pekerjaan terbesar berikutnya** |
+| `mkiosroot.sh` (root iOS 15.6.1) | ❌ belum |
 | Boot ke SpringBoard | ❌ target akhir |
 
-## Berkas yang relevan untuk Mi A1
+## Berkas
 
 | Berkas | Fungsi |
 |--------|--------|
-| `tools/mkadt.py` | Editor/generator **Apple Device Tree** (format yang dipakai XNU) |
+| `tools/mkadt.py` | Editor/generator **Apple Device Tree** (format yang dipakai XNU) + audit syarat XNU |
 | `tools/extract_adt.py` | Ambil `DeviceTree.d22ap.im4p` dari IPSW + decompress |
 | `tools/build_tissot_dtb.py` | FDT Linux MSM8953 (referensi alamat register) |
-| `tools/make_tissot_bootimg.py` | Packer Android `boot.img` (kernel + ramdisk + DTB) |
+| `tools/make_tissot_bootimg.py` | Packer Android `boot.img` (kernel + ramdisk + DTB + ADT) |
 | `tools/build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (uji pipeline) |
 | `devices/tissot/` | Profil device + `build-bootimage.sh` |
-| `xnu/patches-8020/` | Patch series untuk XNU 8020 |
-| `xnu/apply-8020.sh` | Unduh source + apply patch |
-| `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`) |
-| `.github/workflows/xnu-tissot.yml` | CI build di macOS runner |
+| `xnu/patches-8020/` | Patch series 0001–0003 untuk XNU 8020 |
+| `xnu/apply-8020.sh` | Unduh source + apply patch + sanity check |
+| `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`, `--no-werror`) |
+| `.github/workflows/xnu-tissot.yml` | CI: verifikasi patch → build kernel → rakit boot image |
+| `Makefile` | `make adt` / `make check` / `make tissot` |
 | `xnu8020-prep.bat`, `make-tissot.bat` | Launcher Windows |
 | `docs/INSTALL-STEP-BY-STEP.md` | **Panduan lengkap A–H** |
 | `docs/XNU8020-PORT-PLAN.md` | Rencana port berbasis `file:line` |
@@ -70,49 +86,56 @@ basis port ini **iOS 15.6.1 (19G82)**. Detail: `docs/IOS15-VS-IOS16-ARMv8.md`.
 ## Alur build
 
 ```
-GitHub Actions (macOS)                     PC kamu (Windows)
-─────────────────────                      ─────────────────
-xnu/apply-8020.sh  → patch XNU              xnu8020-prep.bat
-xnu-build-arm64.sh → kernel ARM64           tools/mkadt.py
-        ↓                                        ↓
-artifact: kernel.*                        tissot.adt + boot.img
-        └───────────────┬────────────────────────┘
-                        ↓
-               fastboot boot  (kamu, di HP)
+GitHub Actions                                        PC kamu (Windows)
+──────────────────────────────────────────            ─────────────────
+job patches   (ubuntu)  patch 0001..0003 + audit      xnu8020-prep.bat
+job kernel    (macos)   make ... ARM64 TISSOT         make-tissot.bat
+job package   (ubuntu)  rakit boot image                        ↓
+        ↓                                                     ↓
+artifact: xnu-tissot-kernel  (mach.* TISSOT)          tissot.adt
+artifact: tissot-boot        (boot.img siap flash)     tissot-boot.img
+        └──────────────────────┬──────────────────────────────┘
+                               ↓
+                      fastboot boot  (kamu, di HP)
 ```
 
-Perintah build yang dipakai CI:
+Perintah build yang dipakai CI (sama dengan `make xnu8020` lokal di macOS):
 
 ```
-make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
+make -C xnu-src-8020 -j4 \
+     ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
      CURRENT_MACHINE_CONFIG=TISSOT SDKROOT=iphoneos
 ```
 
+### Menjalankan build kernel di GitHub Actions
+
+Tidak perlu Mac, tidak perlu install apa pun di PC:
+
+1. Push repo ke GitHub (repo **publik** dapat menit macOS gratis; repo privat
+   memakai kuota menit akun).
+2. Buka tab **Actions** → pilih workflow **xnu-tissot**.
+3. Klik **Run workflow**, pilih `config` (`DEVELOPMENT` / `RELEASE` / `DEBUG`),
+   biarkan `pack` = true, lalu **Run workflow**.
+4. Tunggu. Job `patches` selesai ~2 menit, `kernel` ~20–40 menit.
+5. Unduh artefak di halaman run:
+   - `xnu-tissot-kernel` — kernel XNU hasil build (Mach-O ARM64)
+   - `tissot-boot` — `tissot-boot.img` hasil rakit, siap `fastboot`
+   - `build-log` — log lengkap; 40 baris `error:` pertama sudah dicetak di
+     ringkasan job
+
+Kalau job `kernel` merah, **baca artefak `build-log`**, bukan hanya ringkasan:
+error pertama biasanya soal knob `TISSOT.h`/`board_config.h` yang belum lengkap,
+atau warning clang baru yang dipromosikan `-Werror`. Workflow otomatis
+mengulang sekali dengan `WERROR=` kalau itu penyebabnya, supaya error aslinya
+kelihatan.
+
+> Catatan jujur: kernel hasil build masih **Mach-O**. ABL melompat ke offset 0
+> payload, dan header Mach-O bukan kode — jadi `fastboot boot` belum akan
+> sampai ke kernel. Yang memotong jarak itu adalah **SHIM** (lihat status di
+> atas). Sampai SHIM ada, CI tetap berguna: ia membuktikan XNU bisa
+> dikompilasi untuk TISSOT, dan itu gerbang utama sebelum bicara booting.
+
 Mulai dari `docs/INSTALL-STEP-BY-STEP.md`.
-
----
-
-## Jalur lama: x86_64 (fase 1, tidak dipakai untuk Mi A1)
-
-Fase pertama proyek ini menargetkan **PC x86_64 / QEMU q35** — "Bliss OS tapi
-untuk XNU". Hasilnya masih ada di repo dan masih bisa dibangun, tetapi **tidak
-berhubungan dengan Mi A1** dan tidak dipakai oleh workflow `xnu-tissot`.
-
-| Berkas | Fungsi |
-|--------|--------|
-| `xnu/hakios-x86.patch`, `xnu/files/`, `xnu/apply.sh` | Patch XNU + driver x86 (VGA, PS/2, AHCI, E1000, HDA, HPET) |
-| `xnu-build-x86.sh`, `xnu-deps/` | Build kernel x86 |
-| `xnuloader/` | Boot loader UEFI x86_64 |
-| `userland/`, `sysimage/`, `qemu/`, `devices/pc-q35/` | User space, fetch IPSW, QEMU |
-| `tools/make-esp.sh`, `make-boot-usb.sh`, `make-rufus-img.sh` | Image USB x86 |
-| `tools/build_kernel_placeholder.py`, `make_rufus_img.py` | Placeholder x86 |
-| `build-windows.ps1` / `.bat`, `make-bootable.bat`, `make-rufus-img.bat`, `run-qemu-windows.bat`, `setup-wsl.bat` | Launcher x86 |
-| `README-windows.md` | Dokumentasi x86 |
-| Target Makefile `x86-open`, `x86-full`, `qemu-open`, `qemu` | Build x86 |
-
-Kenapa masih ada: bukan sampah — ia mendokumentasikan fase 1 dan masih bisa
-dijalankan. Kalau tidak diperlukan lagi, jalur ini bisa dipindah ke
-`legacy-x86/` atau dihapus.
 
 ---
 

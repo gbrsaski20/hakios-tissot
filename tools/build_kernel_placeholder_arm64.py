@@ -27,8 +27,8 @@ What this produces
 ------------------
 A structurally valid `Image` whose entry point spins in a low-power loop and
 prints nothing (no UART driver yet). It exists so the whole build -> pack ->
-fastboot pipeline can be exercised end to end, exactly like the x86 path uses
-tools/build_kernel_placeholder.py.
+fastboot pipeline can be exercised end to end without needing a macOS build
+of the real kernel.
 
 Replace it with a real XNU ARM64 kernel once you can build one:
     prebuilt/tissot-kernel-arm64.Image

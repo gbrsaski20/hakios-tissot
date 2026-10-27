@@ -1,81 +1,97 @@
-#!/bin/bash
-# ============================================================================
-# xnu/README.md — About the XNU kernel in HakiOS-x86
-# ============================================================================
+# XNU untuk Xiaomi Mi A1 (`tissot`)
 
-# XNU Kernel (HakiOS-x86)
+Direktori ini berisi **patch series** yang membuat XNU dari Apple bisa
+dibangun dan boot di Qualcomm **MSM8953** (Snapdragon 625, 8× Cortex-A53,
+ARMv8.0-A).
 
-## What we change
+Basis: **`xnu-8020.140.41`** — generasi kernel iOS 15. Apple hanya
+mempublikasikan tiga tag 8020: `.101.4` (iOS 15.0), `.121.3`, `.140.41`
+(terbaru). iOS 15 dipilih karena userland `arm64`-nya masih harus jalan di
+iPhone 6s (A9 = ARMv8.0), jadi tidak memakai instruksi ARMv8.2 yang akan
+trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 
-The XNU kernel (xnu-8796.121.2, published by Apple under APSL 2.0) already
-supports x86_64 as a build architecture. The changes in HakiOS-x86 are:
+## Isi direktori
 
-1. **Platform Expert**: A new platform expert for the PC/x86_64 environment
-   that uses ACPI and PCI for device discovery (instead of the device tree
-   used on ARM).
+| File | Isi |
+|------|-----|
+| `apply-8020.sh` | Unduh `xnu-8020.140.41`, terapkan semua patch berurutan, lalu sanity-check penanda tiap patch |
+| `patches-8020/0001-add-tissot-board-config.patch` | Board config `TISSOT`: masuk `SUPPORTED_ARM64_MACHINE_CONFIGS`, `-mcpu=cortex-a53`, **`arm64` bukan `arm64e`** (Cortex-A53 tidak punya PAC), `TISSOT.h`, blok `board_config.h` |
+| `patches-8020/0002-tissot-uart-console.patch` | Driver console BLSP1 UART1 @ `0x078AF000` (`ttyHSL0`): `SERIAL_TISSOT_UART`, offset register UARTDM, blok driver di `pe_serial.c` |
+| `patches-8020/0003-tissot-gicv2-interrupts.patch` | Driver **GIC-400 (GICv2)** + jalur ack/EOI MMIO. Tanpa ini `pe_init_fiq()` kosong dan kernel hang setelah beberapa baris UART |
 
-2. **Drivers**: Custom drivers for standard PC hardware:
-   - VGA/Bochs VBE display
-   - i8042 keyboard/mouse
-   - AHCI SATA and virtio-blk disk
-   - Intel E1000 and virtio-net network
-   - Intel HDA audio
-   - HPET/Local APIC timer
-   - 16550 UART serial
-   - PCI configuration space
+## Kenapa tiga patch itu perlu
 
-3. **Boot arguments**: Extended the boot argument parser to understand
-   HakiOS-x86 specific arguments (display, input, disk, net, audio, serial).
+**0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
+ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
+Authentication, dan Cortex-A53 tidak punya PAC → kernel tidak akan jalan.
+Patch ini mengembalikannya ke `arm64` khusus `CURRENT_MACHINE_CONFIG=TISSOT`.
 
-4. **Device tree support**: While x86_64 normally uses ACPI, we also
-   support a minimal device tree for simpler QEMU configuration.
+**0002 — console.** Tanpa UART tidak ada cara melihat apa pun sebelum display
+hidup. `init()` sengaja **tidak** memprogram ulang baud rate: ABL sudah
+menyetel `console=ttyHSL0,115200,n8`, jadi driver hanya menyalakan
+transmitter.
 
-## How to build
+**0003 — interrupt.** XNU 8020 hanya punya **Apple AIC** dan **GICv3**
+(`HAS_GIC_V3`, yang cuma didefinisikan `VMAPPLE.h`). MSM8953 memakai
+**GIC-400 = GICv2**. Untuk build non-GICv3, `pe_init_fiq()` di source asli
+kosong total, dan `sleh_irq()` memakai system register GICv3
+(`ICC_IAR0_EL1`/`ICC_EOIR0_EL1`) yang tidak ada di GICv2. Akibatnya kernel
+akan keluar beberapa baris lalu hang selamanya tanpa pernah menerima
+interrupt timer.
+
+## Cara pakai
 
 ```bash
-# 1. Apply the patch to a fresh XNU clone
-xnu/apply.sh
+# unduh source + terapkan 0001, 0002, 0003
+./xnu/apply-8020.sh
 
-# 2. Set up dependencies
-xnu-deps/setup.sh
+# verifikasi toolchain (akan melaporkan yang kurang)
+./xnu-build-arm64.sh --check
 
-# 3. Build
-./xnu-build-x86.sh -j8 -c DEVELOPMENT
+# build (butuh macOS + cctools + SDK — lihat catatan di bawah)
+./xnu-build-arm64.sh --config DEVELOPMENT --jobs 4
 ```
 
-The build produces `mach.development` (or `mach.release`, `mach.debug`)
-in the XNU build output directory. It is copied to `prebuilt/`.
+Di Windows, pakai `xnu8020-prep.bat` — itu menjalankan langkah pertama dan
+kedua saja (source + patch), karena build kernelnya tidak bisa di Windows.
 
-## Files
+## Kenapa build butuh macOS
 
-| File | Purpose |
-|------|---------|
-| `hakios-x86.patch` | Patch applied on top of Apple's XNU |
-| `apply.sh` | Clone XNU and apply the patch |
-| `files/bsd/dev/hakios.*.c` | Our x86_64 device drivers |
-| `files/MASTER.x86_64` | Build configuration for the HakiOS target |
-| `files/pexpert/x86/hakios_platform.c` | Platform expert for x86_64 |
+XNU butuh **clang + cctools** (`ld` dengan dukungan Mach-O, `ctf_insert`,
+`kextsymboltool`) **+ SDK Apple**, dan makefile-nya berasumsi userland
+BSD/macOS. Ini persyaratan **mesin build**, bukan target: targetnya tetap
+Mi A1 (ARM64). Proyek pembanding `dipa-studio/ios-sweet` juga membangun
+kernelnya di GitHub Actions runner macOS.
 
-## XNU x86_64 build anatomy
+Karena repo publik dapat menit macOS gratis di GitHub Actions, jalur yang
+dipakai adalah `.github/workflows/xnu-tissot.yml`.
 
-XNU's build system for x86_64 uses:
+Perintah `make` yang benar (terverifikasi di `makedefs/MakeInc.cmd:143-151`):
 
 ```
-ARCH_CONFIGS=X86_64
-KERNEL_CONFIGS=DEVELOPMENT
-TARGET_CONFIGS=hakios     (our custom target)
+make ARCH_CONFIGS=ARM64 KERNEL_CONFIGS=DEVELOPMENT \
+     CURRENT_MACHINE_CONFIG=TISSOT SDKROOT=iphoneos
 ```
 
-The `TARGET_CONFIGS` selects a file in `config/` that defines platform-
-specific settings. We created `config/hakios.x86_64`.
+`SDKROOT=iphoneos` dan **bukan** path SDK macOS: `PLATFORM` diturunkan dari
+`xcrun -sdk $(SDKROOT) -show-sdk-platform-path`. Memberi SDK macOS membuat
+`PLATFORM=MacOSX` → yang dibangun kernel ARM64-macOS, bukan iPhoneOS. Jangan
+memberi `PLATFORM` manual — nilainya harus *undefined* agar derivasi itu jalan.
 
-## Boot flow on x86_64
+## Status
 
-1. UEFI firmware (OVMF in QEMU) loads
-2. UEFI starts our `xnuloader.efi` from the EFI System Partition
-3. xnuloader reads `mach_kernel` and the kernel command line
-4. xnuloader fills `BootArgs` and jumps to the kernel entry
-5. XNU's `i386_init` / `x86_64_start` runs
-6. Platform expert initializes ACPI / PCI
-7. Drivers load
-8. User space starts
+| Patch | Status |
+|-------|--------|
+| 0001 board config | ✅ apply teruji |
+| 0002 UART console | ✅ apply teruji, **belum dikompilasi** |
+| 0003 GICv2 | ✅ apply teruji, **belum dikompilasi** |
+
+Rantai `pristine → 0001 → 0002 → 0003` terbukti mereproduksi tree kerja
+byte-identik di 7 file. Detail lengkap dan sisa pekerjaan (SHIM, verifikasi
+hardware): `docs/XNU8020-PORT-PLAN.md`.
+
+## Lisensi
+
+XNU adalah milik Apple, APSL 2.0. Patch di direktori ini adalah karya proyek
+ini dan mengikuti APSL 2.0 untuk file yang merupakan turunan XNU. Lihat
+`LEGAL.md` dan `THIRD_PARTY_LICENSES.md`.
