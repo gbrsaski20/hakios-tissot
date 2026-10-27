@@ -233,6 +233,24 @@ jobs:
             echo "::error::availability.pl tidak ada di SDK iPhoneOS. Isi usr/local/libexec: ${LISTING:-<kosong/tidak ada>}"
           fi
 
+          # Cari di mana availability.pl sebenarnya berada di mesin ini.
+          # XNU mengharapkannya di \$SDK/usr/local/libexec/, tapi SDK iOS
+          # tidak mengirim direktori itu, dan SDK macOS pun belum tentu.
+          echo "--- mencari availability.pl ---"
+          HOST_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+          echo "host sdk : $HOST_SDK"
+          echo "dev dir  : $(xcode-select -p 2>/dev/null || echo '-')"
+          for p in "$HOST_SDK/usr/local/libexec/availability.pl" \
+                   "$(xcode-select -p 2>/dev/null)/usr/local/libexec/availability.pl" \
+                   /usr/local/libexec/availability.pl; do
+            if [ -x "$p" ]; then echo "  FOUND $p"; else echo "  tidak ada: $p"; fi
+          done
+          echo "  hasil find:"
+          FOUND_LIST="$(find /Applications/Xcode*.app /Library/Developer /usr/local \
+               -name availability.pl 2>/dev/null | head -3 | tr '\n' ' ')"
+          echo "  ${FOUND_LIST:-<tidak ditemukan>}"
+          echo "::error::probe availability.pl | host_sdk=${HOST_SDK:-<kosong>} | ditemukan: ${FOUND_LIST:-<tidak ada di mana pun>}"
+
       - name: Siapkan source + patch
         run: |
           chmod +x xnu/apply-8020.sh xnu-build-arm64.sh
