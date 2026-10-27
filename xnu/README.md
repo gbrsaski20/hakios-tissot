@@ -22,8 +22,9 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0005-clang-modern-compat.patch` | Kompatibilitas clang Xcode 26: buang `-enable-trivial-auto-var-init-zero-...` (sudah dihapus dari clang, dan `-ftrivial-auto-var-init=zero` sudah ada di baris atasnya), jaga `-I$(SDKROOT)/usr/local/include/kernel` dengan `wildcard`, matikan `-Wmissing-include-dirs` |
 | `patches-8020/0006-clang-reserved-identifier.patch` | Matikan `-Wreserved-identifier`. `-Weverything` + `-Werror` mengubah setiap `__int8_t`/`__uint8_t` di `bsd/arm/_types.h` jadi error — satu objek melaporkan **156 errors** dari satu diagnosa yang sama |
 | `patches-8020/0007-export-tissot-header.patch` | Tambahkan `TISSOT.h` ke `PRIVATE_KERNELFILES` di `pexpert/pexpert/arm64/Makefile`. Tanpa ini header itu tidak pernah disalin ke `BUILD/obj/EXPORT_HDRS/`, sehingga `#include <pexpert/arm64/TISSOT.h>` di `board_config.h:80` mati dengan *file not found* |
+| `patches-8020/0008-tissot-proc-reg-cpu-type.patch` | `osfmk/arm/proc_reg.h` mengenali CPU lewat makro telanjang (`APPLE_ARM64_ARCH_FAMILY`, `BCM2837`, `VMAPPLE`, …). TISSOT tidak ada di daftar itu → `#error Incompatible CPU type configured` lalu `#error processor not supported`. Patch ini menambah cabang TISSOT (cache line A53 = 64 B = `1 << 6`) dan melewatkan tunggu 30 detik untuk service `IORTC` yang tidak ada di tissot |
 
-## Kenapa tujuh patch itu perlu
+## Kenapa delapan patch itu perlu
 
 **0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
 ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
@@ -73,6 +74,26 @@ pun dengan Xcode 26 akan kena:
 - `TISSOT.h` harus masuk `PRIVATE_KERNELFILES`, karena hanya header yang
   terdaftar di situ yang disalin ke `EXPORT_HDRS/` — tempat semua
   `#include <pexpert/arm64/...>` dicari.
+
+**0008 — CPU type.** Ini yang paling khas "menambah board baru". XNU memilih
+konfigurasi cache dan makro fault lewat rantai `#if` yang memeriksa makro
+telanjang dari header board masing-masing: `APPLE_ARM64_ARCH_FAMILY`,
+`APPLETYPHOON`, `APPLETWISTER`, … `BCM2837`, `VMAPPLE`. TISSOT.h mendefinisikan
+`TISSOT` dan `MSM8953`, dan tidak ada satu pun rantai itu yang mencarinya, jadi
+build jatuh ke `#else` yang isinya `#error`. Dua error muncul dari satu sebab:
+
+```
+osfmk/arm/proc_reg.h:273:2: error: Incompatible CPU type configured
+osfmk/arm/proc_reg.h:381:2: error: processor not supported
+```
+
+Patch ini menambah cabang TISSOT di kedua rantai. Nilai cache line-nya 64 byte
+(`1 << 6`) untuk I-cache maupun D-cache, sesuai Cortex-A53 TRM §6.2.
+
+Guard-nya memakai `ARM64_BOARD_CONFIG_TISSOT`, bukan `TISSOT`, karena yang
+pertama berasal dari `MACHINE_FLAGS` di `makedefs/MakeInc.def` sehingga
+terdefinisi di **setiap** unit kompilasi — `proc_reg.h` dan `IOStartIOKit.cpp`
+tidak selalu meng-include `board_config.h`.
 
 ## Cara pakai
 

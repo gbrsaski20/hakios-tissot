@@ -78,7 +78,7 @@ bash tools/wsl-check.sh --no-fetch   # kalau xnu-src-8020 sudah ada
 
 Mereproduksi job `patches` dari CI di WSL/Linux, supaya iterasi patch tidak
 perlu menunggu runner macOS. Memeriksa: tool yang dibutuhkan, CRLF pada
-skrip, patch 0001..0007 apply bersih, 15 penanda patch, TISSOT -> `arm64`
+skrip, patch 0001..0008 apply bersih, 17 penanda patch, TISSOT -> `arm64`
 (bukan `arm64e`), `-mcpu=cortex-a53`, lalu rakit ADT + DTB + boot image.
 
 Dia **tidak** mengompilasi kernel dan tidak berpura-pura bisa: XNU butuh

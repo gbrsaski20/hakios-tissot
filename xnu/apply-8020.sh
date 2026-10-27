@@ -175,6 +175,9 @@ need_absent "makedefs/MakeInc.def" "enable-trivial-auto-var-init-zero"
 need_grep "makedefs/MakeInc.def" "Wno-reserved-identifier"
 # patch 0007 (ekspor TISSOT.h ke EXPORT_HDRS)
 need_grep "pexpert/pexpert/arm64/Makefile" "TISSOT.h"
+# patch 0008 (CPU type Cortex-A53 di proc_reg.h)
+need_grep "osfmk/arm/proc_reg.h" "ARM64_BOARD_CONFIG_TISSOT"
+need_grep "iokit/Kernel/IOStartIOKit.cpp" "!defined(ARM64_BOARD_CONFIG_TISSOT)"
 
 if [ "$fail" -ne 0 ]; then
     echo ""
