@@ -139,9 +139,15 @@ echo ""
 # ---------------------------------------------------------------------------
 SDK_NAME="${SDKROOT:-iphoneos}"
 
+# TARGET_CONFIGS is built from KERNEL_CONFIGS x ARCH_CONFIGS x MACHINE_CONFIGS.
+# MACHINE_CONFIGS defaults to "DEFAULT", which resolves to VMAPPLE for ARM64 —
+# i.e. an Apple VM kernel, not tissot. Passing it explicitly is what actually
+# selects our board config for the *target list* (CURRENT_MACHINE_CONFIG alone
+# only affects the per-directory flags).
 MAKE_CMD=(make -C "$SRC" -j"$JOBS"
           ARCH_CONFIGS=ARM64
           KERNEL_CONFIGS="$CONFIG"
+          MACHINE_CONFIGS="$MACHINE"
           CURRENT_MACHINE_CONFIG="$MACHINE"
           SDKROOT="$SDK_NAME")
 

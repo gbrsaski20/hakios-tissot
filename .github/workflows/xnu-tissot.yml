@@ -282,6 +282,20 @@ jobs:
           echo "=== 30 baris terakhir ==="
           tail -30 build.log 2>/dev/null || true
 
+          # Anotasi: kalau build gagal, error teratas dipancarkan sebagai
+          # ::error:: supaya kelihatan di tab Checks tanpa perlu login untuk
+          # mengunduh artefak. Ini satu-satunya jejak yang terbaca publik.
+          if [ -s build.log ]; then
+            cand="$(grep -E "make(\[[0-9]+\])?: \*\*\*|error:" build.log | head -3)"
+            if [ -z "$cand" ]; then
+              cand="$(grep -v '^[[:space:]]*$' build.log | tail -3)"
+            fi
+            printf '%s\n' "$cand" | while IFS= read -r l; do
+              [ -n "$l" ] || continue
+              echo "::error::$(printf '%s' "$l" | cut -c1-280)"
+            done
+          fi
+
       - name: Ringkasan job
         if: always()
         run: |
