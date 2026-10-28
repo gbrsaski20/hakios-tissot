@@ -444,6 +444,29 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Diagnosa lib kernel (platform macOS vs iOS)
+        if: always()
+        run: |
+          IOS_SDK="$(xcrun -sdk iphoneos -show-sdk-path 2>/dev/null || true)"
+          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+          IOS_LIB="no"; [ -d "$IOS_SDK/usr/local/lib/kernel" ] && IOS_LIB="yes"
+          CCK="$(find /Applications/Xcode*.app -name libcc_kext.a 2>/dev/null | head -1)"
+          FHK="$(find /Applications/Xcode*.app -name libfirehose_kernel.a 2>/dev/null | head -1)"
+          echo "ios_kernel_lib_dir = $IOS_LIB"
+          echo "iOS SDK  : $IOS_SDK"
+          echo "macOS SDK: $MAC_SDK"
+          echo "libcc_kext.a         : ${CCK:-<tidak ada>}"
+          echo "libfirehose_kernel.a : ${FHK:-<tidak ada>}"
+          echo ""
+          echo "--- iOS usr/local/lib/kernel ---"
+          ls -la "$IOS_SDK/usr/local/lib/kernel" 2>&1 | head -10 || true
+          echo ""
+          echo "--- error platform di build.log ---"
+          grep -n -E "incompatible platforms|building for macOS" build.log 2>/dev/null | head -3 || true
+          echo "--- flag -platform_version di log (kalau ada) ---"
+          grep -o -E -- "-platform_version [a-zA-Z]+" build.log 2>/dev/null | sort | uniq -c | head || true
+          echo "::notice::ios_kernel_lib_dir=${IOS_LIB} cc_kext=${CCK:-<none>} firehose=${FHK:-<none>}"
+
       - name: Ringkasan job
         if: always()
         run: |
