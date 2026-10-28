@@ -1,0 +1,12 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -872,7 +872,8 @@
+ 		  $($(addsuffix $(CURRENT_ARCH_CONFIG),LDFLAGS_KERNEL_)) \
+ 		  $($(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_)) \
+ 		  $($(addsuffix $(CURRENT_ARCH_CONFIG), $(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_))) \
+-		  $(DEPLOYMENT_TARGET_FLAGS)
++		  $(DEPLOYMENT_TARGET_FLAGS) \
++		  $(DEPLOYMENT_LINKER_FLAGS)
+ 
+ LDFLAGS_KERNEL_ONLY  +=   \
+ 		  $($(addsuffix $(CURRENT_ARCH_CONFIG), $(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_ONLY_CONFIG_))) \
