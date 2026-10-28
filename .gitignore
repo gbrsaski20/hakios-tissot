@@ -70,3 +70,6 @@ Thumbs.db
 
 # Catatan internal agent (bukan bagian dari proyek)
 .workbuddy-ai/
+
+# Klon dependency build (cctools/ld64 untuk host Linux), bukan source proyek
+cctools-port/

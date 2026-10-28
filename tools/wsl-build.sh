@@ -5,7 +5,7 @@
 # Satu perintah untuk seluruh pipeline lokal:
 #
 #   1. cek lingkungan + toolchain
-#   2. unduh XNU 8020 (kalau belum ada) dan terapkan patch 0001..0008
+#   2. unduh XNU 8020 (kalau belum ada) dan terapkan patch 0001..0009
 #   3. verifikasi penanda patch + ABI (arm64, bukan arm64e)
 #   4. rakit ADT + DTB + boot image
 #   5. kompilasi kernel  <- hanya jalan kalau toolchain Mach-O tersedia
@@ -122,6 +122,28 @@ CTF_BIN="";  for c in ctf_insert ctf_insert-ld64; do have "$c" && { CTF_BIN="$c"
 
 TC_MISSING=0
 
+if [ "$HOST" = "Darwin" ]; then
+    # Di macOS semua alat datang lewat Xcode. `command -v ld64` memang tidak
+    # akan menemukan apa pun, karena ld64, ctf_insert, dan kextsymboltool ada
+    # di dalam Xcode.app — bukan di PATH. Jadi jangan probe satu per satu.
+    if have xcrun && xcrun -sdk iphoneos -show-sdk-path >/dev/null 2>&1; then
+        [ -n "$SDKROOT_DETECT" ] || SDKROOT_DETECT="$(xcrun -sdk iphoneos -show-sdk-path)"
+        ok "macOS + Xcode: toolchain Mach-O ditangani xcrun"
+        info "  SDK iPhoneOS: $SDKROOT_DETECT"
+        if have unifdef; then
+            ok "unifdef: $(command -v unifdef)"
+        else
+            warn "unifdef tidak ada — docgen config memerlukannya"
+            info "  brew install unifdef"
+            TC_MISSING=$((TC_MISSING + 1))
+        fi
+    else
+        bad "Xcode / SDK iPhoneOS tidak ditemukan"
+        info "  install Xcode, lalu: sudo xcode-select -s /Applications/Xcode.app"
+        TC_MISSING=$((TC_MISSING + 1))
+    fi
+else
+
 if [ -n "$CC_BIN" ]; then
     ok "clang: $CC_BIN ($($CC_BIN --version 2>/dev/null | head -1))"
 else
@@ -171,6 +193,8 @@ else
     TC_MISSING=$((TC_MISSING + 1))
 fi
 
+fi  # selesai cabang non-macOS
+
 if [ "$TC_MISSING" -eq 0 ]; then
     printf '\n  %sToolchain lengkap.%s\n' "$GRN" "$OFF"
 else
@@ -186,13 +210,44 @@ else
 
   Tiga jalan yang benar-benar bisa dipakai:
     a) Jalankan skrip ini di macOS (langsung, tanpa apa pun tambahan).
-    b) Pasang macOS di WSL2 lewat KVM (OSX-KVM). Berat: ~40 GB, dan
-       installer macOS tetap harus diambil dari Apple.
+    b) Pasang macOS di WSL2 lewat QEMU/KVM. Berat: ~40 GB, dan installer
+       macOS tetap harus diambil dari server Apple.
+       Panduan: docs/MACOS-VM-WSL.md
+       Cek dulu: bash tools/macos-vm-preflight.sh
     c) Jalankan workflow GitHub sekali lagi dari tab Actions (manual).
 
   Yang TIDAK bisa: meng-compile XNU di WSL/Linux polos dengan clang
   bawaan. Linker-nya ELF, dan tidak ada SDK-nya.
 EOF
+fi
+
+# --- toolchain shim: bagian yang BISA dikerjakan penuh di WSL --------------
+#
+# ios-sweet membangun kernel di runner macOS, tapi shim dan boot image-nya
+# dibangun di Linux dengan aarch64-linux-gnu-gcc. Pembagian yang sama berlaku
+# di sini: shim adalah penghalang terbesar kita sekarang, dan justru bagian
+# itu yang tidak butuh macOS sama sekali.
+head_ "2b. Toolchain shim (bisa di WSL)"
+
+SHIM_CC=""
+for c in aarch64-linux-gnu-gcc aarch64-none-elf-gcc; do
+    have "$c" && { SHIM_CC="$c"; break; }
+done
+
+if [ -n "$SHIM_CC" ]; then
+    ok "cross-compiler aarch64: $SHIM_CC"
+elif [ -n "$CC_BIN" ] && "$CC_BIN" --print-targets 2>/dev/null | grep -qi aarch64; then
+    ok "clang bisa target aarch64 (--target=aarch64-none-elf)"
+else
+    warn "belum ada cross-compiler aarch64"
+    info "  WSL: sudo apt install gcc-aarch64-linux-gnu"
+fi
+
+if [ -d "$ROOT/shim" ]; then
+    ok "direktori shim/ ada"
+else
+    info "shim/ belum ada — penghalang terbesar saat ini, dan justru bagian"
+    info "  yang bisa dikerjakan penuh di WSL tanpa macOS"
 fi
 
 if [ "$DO_CHECK" -eq 1 ]; then
@@ -203,7 +258,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. source + patch
 # ---------------------------------------------------------------------------
-head_ "3. Source XNU 8020 + patch 0001..0008"
+head_ "3. Source XNU 8020 + patch 0001..0009"
 
 bash "$ROOT/xnu/apply-8020.sh" || { bad "apply-8020.sh gagal"; exit 1; }
 
@@ -267,12 +322,18 @@ elif [ "$TC_MISSING" -ne 0 ]; then
     warn "dilewati — toolchain belum lengkap (lihat bagian 2)"
     info "  pipeline lokal tetap lanjut; yang belum bisa hanya kompilasi."
 else
-    info "menyiapkan shim xcrun untuk host non-macOS..."
-    SHIM_DIR="$(mktemp -d)"
-    trap 'rm -rf "$SHIM_DIR"' EXIT
+    if [ "$HOST" = "Darwin" ]; then
+        # Di macOS tidak perlu shim: xcrun asli sudah ada.
+        export SDKROOT="$SDKROOT_DETECT"
+        info "SDKROOT=$SDKROOT_DETECT"
+        JOBS_N="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+    else
+        info "menyiapkan shim xcrun untuk host non-macOS..."
+        SHIM_DIR="$(mktemp -d)"
+        trap 'rm -rf "$SHIM_DIR"' EXIT
 
-    SDK_PLATFORM="$(basename "$(dirname "$(dirname "$SDKROOT_DETECT")")")"
-    cat > "$SHIM_DIR/xcrun" <<SHIM
+        SDK_PLATFORM="$(basename "$(dirname "$(dirname "$SDKROOT_DETECT")")")"
+        cat > "$SHIM_DIR/xcrun" <<SHIM
 #!/bin/sh
 # Shim minimal supaya makefile XNU bisa jalan di luar macOS.
 SDK="$SDKROOT_DETECT"
@@ -283,13 +344,15 @@ case "\$*" in
   *) exit 1 ;;
 esac
 SHIM
-    chmod +x "$SHIM_DIR/xcrun"
-    export PATH="$SHIM_DIR:$PATH"
-    export SDKROOT="$SDKROOT_DETECT"
-    info "SDKROOT=$SDKROOT  PLATFORM=$SDK_PLATFORM"
+        chmod +x "$SHIM_DIR/xcrun"
+        export PATH="$SHIM_DIR:$PATH"
+        export SDKROOT="$SDKROOT_DETECT"
+        JOBS_N="$(nproc 2>/dev/null || echo 4)"
+        info "SDKROOT=$SDKROOT  PLATFORM=$SDK_PLATFORM"
+    fi
 
     if [ -x "$BUILD" ]; then
-        bash "$BUILD" --force --config DEVELOPMENT --jobs "$(nproc 2>/dev/null || echo 4)" \
+        bash "$BUILD" --force --config DEVELOPMENT --jobs "$JOBS_N" \
             || { bad "kompilasi gagal — baca error pertama di atas"; FAIL=1; }
     else
         bad "xnu-build-arm64.sh tidak ada / tidak executable"; FAIL=1
