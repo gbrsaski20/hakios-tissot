@@ -69,7 +69,7 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — verifikasi patch series (Linux, tanpa macOS)
   #
-  # Mengunduh xnu-8020.140.41, menerapkan 0001..0009 berurutan, lalu memastikan
+  # Mengunduh xnu-8020.140.41, menerapkan 0001..0010 berurutan, lalu memastikan
   # setiap penanda patch benar-benar ada. Kalau ada yang gagal di sini, build
   # kernel di job 2 pasti juga gagal — jadi ini gerbang cepat.
   # --------------------------------------------------------------------------
@@ -135,6 +135,9 @@ jobs:
           check bsd/dev/vn/vn.c                      'UIO_STACKBUF(uio_buf, 1)'
           check iokit/IOKit/IORPC.h                  kernelContent
           check iokit/DriverKit/IORPC.h              kernelContent
+          echo "--- patch 0010: firehose header + bool fix ---"
+          test -f "$SRC/libkern/os/firehose_buffer_private.h"
+          check libkern/os/firehose_buffer_private.h __firehose_buffer_tracepoint_reserve
           if grep -q 'enable-trivial-auto-var-init-zero' "$SRC/makedefs/MakeInc.def"; then
             echo '  FAIL  flag clang lama masih ada'; exit 1
           fi
@@ -250,9 +253,9 @@ jobs:
             echo "availability.pl : ok"
           else
             LISTING="$(ls "$SDK_PATH/usr/local/libexec" 2>&1 | tr '\n' ' ' | cut -c1-200)"
-            echo "availability.pl : MISSING (bsd/sys akan gagal)"
+            echo "availability.pl : MISSING (patch 0004 -> daftar versi bawaan)"
             echo "isi usr/local/libexec: ${LISTING:-<kosong/tidak ada>}"
-            echo "::error::availability.pl tidak ada di SDK iPhoneOS. Isi usr/local/libexec: ${LISTING:-<kosong/tidak ada>}"
+            echo "::warning::availability.pl tidak ada di SDK iPhoneOS — BUKAN blocker: patch 0004 memakai daftar versi bawaan. Isi usr/local/libexec: ${LISTING:-<kosong/tidak ada>}"
           fi
 
           # Cari di mana availability.pl sebenarnya berada di mesin ini.
@@ -271,7 +274,7 @@ jobs:
           FOUND_LIST="$(find /Applications/Xcode*.app /Library/Developer /usr/local \
                -name availability.pl 2>/dev/null | head -3 | tr '\n' ' ')"
           echo "  ${FOUND_LIST:-<tidak ditemukan>}"
-          echo "::error::probe availability.pl | host_sdk=${HOST_SDK:-<kosong>} | ditemukan: ${FOUND_LIST:-<tidak ada di mana pun>}"
+          echo "::notice::probe availability.pl | host_sdk=${HOST_SDK:-<kosong>} | ditemukan: ${FOUND_LIST:-<tidak ada di mana pun>}"
 
       - name: Siapkan source + patch
         run: |
@@ -344,8 +347,13 @@ jobs:
             LOG=build-retry.log
             echo ">>> membaca percobaan kedua: $LOG"
           fi
-          echo "=== error: ==="
-          grep -n -i -m 40 "error:" "$LOG" 2>/dev/null || echo "(tidak ada 'error:' di log)"
+          # Hanya diagnostik compiler SEJATI: path:line:col: error: ...
+          # `grep "error:"` polos ikut menangkap baris source yang memuat kata
+          # "error:" di dalam string (netem/IOLog/kcdata), sehingga error asli
+          # tertutup noise. Pola ini butuh prefix file:baris:kolom.
+          ERR=':[0-9]+:[0-9]+: (fatal )?error:'
+          echo "=== error (diagnostik sejati) ==="
+          grep -n -E "$ERR" "$LOG" 2>/dev/null | head -40 || true
           echo ""
           echo "=== 30 baris terakhir ==="
           tail -30 "$LOG" 2>/dev/null || true
@@ -360,7 +368,7 @@ jobs:
           #      satu run memperlihatkan seluruh daftar masalah, bukan satu
           #      per run. Nomor baris tetap ikut supaya bisa ditelusuri.
           if [ -s "$LOG" ]; then
-            first="$(grep -n -m1 -E 'error:' "$LOG" | cut -d: -f1)"
+            first="$(grep -n -m1 -E "$ERR" "$LOG" | cut -d: -f1)"
             if [ -n "$first" ]; then
               echo "::error::=== AKAR MASALAH (error pertama, baris $first) ==="
               end=$((first + 2))
@@ -369,8 +377,8 @@ jobs:
                 echo "::error::$(printf '%s' "$l" | cut -c1-280)"
               done
 
-              n_all="$(grep -c -E 'error:' "$LOG" || true)"
-              n_uniq="$(grep -E 'error:' "$LOG" | awk '
+              n_all="$(grep -c -E "$ERR" "$LOG" || true)"
+              n_uniq="$(grep -E "$ERR" "$LOG" | awk '
                 { msg = $0; sub(/^.*error:[[:space:]]*/, "", msg) }
                 !seen[msg]++ { c++ }
                 END { print c + 0 }')"
@@ -378,7 +386,7 @@ jobs:
 
               if [ "${n_uniq:-0}" -gt 1 ]; then
                 echo "::error::=== SEMUA PESAN ERROR YANG BERBEDA ==="
-                grep -E 'error:' "$LOG" | awk '
+                grep -E "$ERR" "$LOG" | awk '
                   { msg = $0; sub(/^.*error:[[:space:]]*/, "", msg) }
                   !seen[msg]++ { print }
                 ' | head -25 | while IFS= read -r l; do
@@ -413,7 +421,7 @@ jobs:
               echo "### Error unik dari build"
               echo ""
               echo '```'
-              grep -E 'error:' "$LOG" | awk '
+              grep -E "$ERR" "$LOG" | awk '
                 { msg = $0; sub(/^.*error:[[:space:]]*/, "", msg) }
                 !seen[msg]++ { print }
               ' | head -40 | cut -c1-240
