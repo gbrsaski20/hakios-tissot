@@ -444,28 +444,40 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Diagnosa lib kernel (platform macOS vs iOS)
+      - name: Diagnosa link (platform macOS vs iOS)
         if: always()
         run: |
-          IOS_SDK="$(xcrun -sdk iphoneos -show-sdk-path 2>/dev/null || true)"
-          MAC_SDK="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
-          IOS_LIB="no"; [ -d "$IOS_SDK/usr/local/lib/kernel" ] && IOS_LIB="yes"
-          CCK="$(find /Applications/Xcode*.app -name libcc_kext.a 2>/dev/null | head -1)"
-          FHK="$(find /Applications/Xcode*.app -name libfirehose_kernel.a 2>/dev/null | head -1)"
-          echo "ios_kernel_lib_dir = $IOS_LIB"
-          echo "iOS SDK  : $IOS_SDK"
-          echo "macOS SDK: $MAC_SDK"
-          echo "libcc_kext.a         : ${CCK:-<tidak ada>}"
-          echo "libfirehose_kernel.a : ${FHK:-<tidak ada>}"
+          echo "=== .linkarguments (flag link sebenarnya) ==="
+          LA="$(find xnu-src-8020/BUILD -name '*.linkarguments' 2>/dev/null | head -1)"
+          if [ -n "$LA" ]; then
+            echo "file: $LA"
+            cat "$LA" 2>/dev/null | tr ' ' '\n' | grep -E '^-' | head -60 || true
+          else
+            echo "(tidak ada .linkarguments)"
+          fi
           echo ""
-          echo "--- iOS usr/local/lib/kernel ---"
-          ls -la "$IOS_SDK/usr/local/lib/kernel" 2>&1 | head -10 || true
+          echo "=== lib kernel (cari luas) ==="
+          CCK="$(find /Library/Developer /Applications /usr/local /opt -name libcc_kext.a 2>/dev/null | head -2 | tr '\n' ' ')"
+          FHK="$(find /Library/Developer /Applications /usr/local /opt -name libfirehose_kernel.a 2>/dev/null | head -2 | tr '\n' ' ')"
+          echo "libcc_kext.a        : ${CCK:-<none>}"
+          echo "libfirehose_kernel.a: ${FHK:-<none>}"
           echo ""
-          echo "--- error platform di build.log ---"
+          echo "=== platform objek kunci ==="
+          OBJROOT="xnu-src-8020/BUILD/obj/DEVELOPMENT_ARM64_TISSOT"
+          for n in version.o nonlto.o justlto.tmp.o; do
+            p="$(find "$OBJROOT" -name "$n" 2>/dev/null | head -1)"
+            if [ -n "$p" ]; then
+              pl="$(vtool -show-build "$p" 2>/dev/null | grep -E 'platform' | head -1)"
+              echo "$n: ${pl:-<no LC_BUILD_VERSION>}  ($p)"
+            else
+              echo "$n: tidak ditemukan"
+            fi
+          done
+          echo ""
+          echo "=== error platform di log ==="
           grep -n -E "incompatible platforms|building for macOS" build.log 2>/dev/null | head -3 || true
-          echo "--- flag -platform_version di log (kalau ada) ---"
-          grep -o -E -- "-platform_version [a-zA-Z]+" build.log 2>/dev/null | sort | uniq -c | head || true
-          echo "::notice::ios_kernel_lib_dir=${IOS_LIB} cc_kext=${CCK:-<none>} firehose=${FHK:-<none>}"
+          echo "::notice::linkargs=$(cat "${LA:-/dev/null}" 2>/dev/null | tr ' ' '\n' | grep -E '^-' | tr '\n' ' ' | cut -c1-700)"
+          echo "::notice::libs cc_kext=${CCK:-<none>} firehose=${FHK:-<none>}"
 
       - name: Ringkasan job
         if: always()
