@@ -20,7 +20,9 @@ Apple (hanya ada 3 tag: `.101.4`, `.121.3`, `.140.41`).
 | Script build + cek toolchain          | ✅ `xnu-build-arm64.sh` (+ `--force`)   |
 | Patch 0002 — driver UART console      | ✅ **draft**, apply teruji (compile TBD)|
 | Patch 0003 — **driver GICv2 (GIC-400)** | ✅ **draft**, apply teruji (compile TBD)|
-| **Build kernel sungguhan**            | ❌ butuh macOS + cctools + SDK          |
+| Patch 0004–0009 — kompatibilitas clang 26 | ✅ apply teruji di pristine          |
+| Patch 0010 — vendor `firehose_buffer_private.h` + `bool` fix | ✅ apply teruji di pristine |
+| **Build kernel sungguhan**            | ❌ kompilasi masih error (lihat §4a)    |
 | UART benar-benar keluar log           | ❌ butuh hardware                      |
 | Interrupt/timer benar-benar jalan     | ❌ butuh hardware                      |
 | `mkadt.py` (Apple Device Tree)        | ✅ round-trip byte-identik, preset ok   |
@@ -298,6 +300,26 @@ fisik (`0x80008000`) ke alamat virtual itu, lalu melompat ke `_start`.
 
 ---
 
+### 4a. Status CI build terakhir (run #16, commit `99ced26`)
+
+Job **patches (Linux)** ✅ hijau — seluruh 0001–0010 apply bersih ke pristine.
+Job **build (macOS runner)** ❌ merah — kompilasi berhenti dengan ±14 pesan
+error berbeda. Dua yang terbesar sudah diperbaiki oleh **patch 0010**:
+
+| Error | Perbaikan |
+|-------|-----------|
+| `libkern/os/log.c:33: fatal error: 'os/firehose_buffer_private.h' file not found` | header di-vendor dari libdispatch (Apache-2.0); guard `OS_FIREHOSE_SPI` dipaksa `1` untuk `KERNEL` |
+| `IOBufferMemoryDescriptor.cpp:335: cannot initialize 'bool' with 'std::nullptr_t'` | `return NULL;` → `return false;` |
+
+**Catatan jujur:** `__firehose_buffer_tracepoint_reserve` / `_flush` **tidak**
+didefinisikan di tree XNU — implementasinya milik **libplatform** (repo Apple
+terpisah, tidak ikut tarball `xnu`). Patch 0010 membuat `log.c` **kompilasi**,
+tetapi tahap **link** bisa gagal karena simbol itu. Jika itu terjadi, langkah
+berikutnya: vendoring `libplatform/os/firehose_buffer.c` (+ dependensinya) atau
+menyediakan stub no-op untuk build bring-up.
+
+---
+
 ## 5. Cara build (dan kenapa tidak bisa di sini)
 
 XNU butuh **clang + cctools (ld, ctf_insert, kextsymboltool) + SDK Apple**,  
@@ -387,7 +409,7 @@ Yang masih menghalangi, berurutan menurut besar-kecilnya:
 1. **SHIM** — belum ada kode yang menyambut kendali dari ABL dan menyiapkan
    MMU/page table sebelum melompat ke `_start` XNU. Tanpa ini kernel tidak
    akan pernah dieksekusi.
-2. **Build kernel di macOS** — patch 0001–0009 baru mencapai tahap kompilasi.
+2. **Build kernel di macOS** — patch 0001–0010 baru mencapai tahap kompilasi.
    Error compiler pertama akan menjadi petunjuk patch berikutnya.
 3. **Verifikasi hardware** — group 0/1 GIC dan offset register UART hanya
    bisa dipastikan di Mi A1 asli.

@@ -183,6 +183,10 @@ need_grep "bsd/sys/uio_internal.h" "UIO_STACKBUF(name, niov)"
 need_absent "bsd/sys/uio_internal.h" "aligned(_Alignof(union iovecs))"
 need_grep "bsd/dev/vn/vn.c" "UIO_STACKBUF(uio_buf, 1)"
 need_grep "iokit/IOKit/IORPC.h" "kernelContent"
+# patch 0010 (vendor os/firehose_buffer_private.h + bool return fix)
+need_file "libkern/os/firehose_buffer_private.h"
+need_grep "libkern/os/firehose_buffer_private.h" "__firehose_buffer_tracepoint_reserve"
+need_grep "iokit/Kernel/IOBufferMemoryDescriptor.cpp" "return false;"
 
 if [ "$fail" -ne 0 ]; then
     echo ""
