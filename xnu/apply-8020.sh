@@ -196,6 +196,8 @@ need_grep "makedefs/MakeInc.def" '$(DEPLOYMENT_LINKER_FLAGS)'
 need_grep "makedefs/MakeInc.def" 'inline-threshold=100 $(DEPLOYMENT_LINKER_FLAGS)'
 # patch 0014 (-target ios di link — clang default macOS)
 need_grep "makedefs/MakeInc.def" 'arm64-apple-ios15.0'
+# patch 0015 (version.o non-LTO + iOS — bitcode-nya macOS)
+need_grep "makedefs/MakeInc.kernel" 'version.o_CFLAGS_ADD'
 
 if [ "$fail" -ne 0 ]; then
     echo ""

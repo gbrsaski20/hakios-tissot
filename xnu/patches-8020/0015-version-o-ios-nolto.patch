@@ -1,0 +1,15 @@
+--- a/makedefs/MakeInc.kernel
++++ b/makedefs/MakeInc.kernel
+@@ -217,6 +217,12 @@
+ 	${C_RULE_2}
+ 
+ -include version.d
++
++# HakiOS: version.o is compiled with -flto by default -> LLVM bitcode whose
++# target triple stays macOS (no -target), so ld rejects it against the iOS
++# kernel objects: "ld: incompatible platforms: macOS - iOS".
++# Build it like nonlto.o: real Mach-O (no LTO) with an explicit iOS target.
++version.o_CFLAGS_ADD = $(CFLAGS_NOLTO_FLAG) -target arm64-apple-ios15.0
+ version.o: .CFLAGS $(filter %/MakeInc.kernel,$(MAKEFILE_LIST))
+ version.o: $(OBJPATH)/version.c
+ 	${C_RULE_0}
