@@ -187,6 +187,9 @@ need_grep "iokit/IOKit/IORPC.h" "kernelContent"
 need_file "libkern/os/firehose_buffer_private.h"
 need_grep "libkern/os/firehose_buffer_private.h" "__firehose_buffer_tracepoint_reserve"
 need_grep "iokit/Kernel/IOBufferMemoryDescriptor.cpp" "return false;"
+# patch 0011 (header juga di EXTERNAL_HEADERS — bsd/kern tidak punya -Ilibkern)
+need_file "EXTERNAL_HEADERS/os/firehose_buffer_private.h"
+need_grep "EXTERNAL_HEADERS/os/firehose_buffer_private.h" "__firehose_buffer_tracepoint_reserve"
 
 if [ "$fail" -ne 0 ]; then
     echo ""
