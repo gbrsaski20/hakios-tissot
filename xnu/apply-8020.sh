@@ -194,6 +194,8 @@ need_grep "EXTERNAL_HEADERS/os/firehose_buffer_private.h" "__firehose_buffer_tra
 need_grep "makedefs/MakeInc.def" '$(DEPLOYMENT_LINKER_FLAGS)'
 # patch 0013 (flag platform juga di LTO merge step — nonlto.o)
 need_grep "makedefs/MakeInc.def" 'inline-threshold=100 $(DEPLOYMENT_LINKER_FLAGS)'
+# patch 0014 (-target ios di link — clang default macOS)
+need_grep "makedefs/MakeInc.def" 'arm64-apple-ios15.0'
 
 if [ "$fail" -ne 0 ]; then
     echo ""

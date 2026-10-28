@@ -1,0 +1,11 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -873,7 +873,7 @@
+ 		  $($(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_)) \
+ 		  $($(addsuffix $(CURRENT_ARCH_CONFIG), $(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_))) \
+ 		  $(DEPLOYMENT_TARGET_FLAGS) \
+-		  $(DEPLOYMENT_LINKER_FLAGS)
++		  $(DEPLOYMENT_LINKER_FLAGS) -target arm64-apple-ios15.0
+ 
+ LDFLAGS_KERNEL_ONLY  +=   \
+ 		  $($(addsuffix $(CURRENT_ARCH_CONFIG), $(addsuffix $(CURRENT_KERNEL_CONFIG),LDFLAGS_KERNEL_ONLY_CONFIG_))) \
