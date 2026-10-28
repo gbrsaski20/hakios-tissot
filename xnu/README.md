@@ -23,8 +23,9 @@ trap di Cortex-A53. Lihat `docs/IOS15-VS-IOS16-ARMv8.md`.
 | `patches-8020/0006-clang-reserved-identifier.patch` | Matikan `-Wreserved-identifier`. `-Weverything` + `-Werror` mengubah setiap `__int8_t`/`__uint8_t` di `bsd/arm/_types.h` jadi error — satu objek melaporkan **156 errors** dari satu diagnosa yang sama |
 | `patches-8020/0007-export-tissot-header.patch` | Tambahkan `TISSOT.h` ke `PRIVATE_KERNELFILES` di `pexpert/pexpert/arm64/Makefile`. Tanpa ini header itu tidak pernah disalin ke `BUILD/obj/EXPORT_HDRS/`, sehingga `#include <pexpert/arm64/TISSOT.h>` di `board_config.h:80` mati dengan *file not found* |
 | `patches-8020/0008-tissot-proc-reg-cpu-type.patch` | `osfmk/arm/proc_reg.h` mengenali CPU lewat makro telanjang (`APPLE_ARM64_ARCH_FAMILY`, `BCM2837`, `VMAPPLE`, …). TISSOT tidak ada di daftar itu → `#error Incompatible CPU type configured` lalu `#error processor not supported`. Patch ini menambah cabang TISSOT (cache line A53 = 64 B = `1 << 6`) dan melewatkan tunggu 30 detik untuk service `IORTC` yang tidak ada di tissot |
+| `patches-8020/0009-clang26-uio-iorpc.patch` | Backport dari XNU upstream: `uio_stackbuf_t` (`char` ber-`aligned(8)`, ukuran 1 byte) diganti makro `UIO_STACKBUF` yang mendeklarasikan array `uint64_t` — clang 26 menolak elemen array yang ukurannya bukan kelipatan alignment-nya (36 deklarasi di 14 file), dan `struct IORPC` diberi field `kernelContent` yang sudah dihasilkan `iig` dari Xcode 26 |
 
-## Kenapa delapan patch itu perlu
+## Kenapa sembilan patch itu perlu
 
 **0001 — PAC.** `makedefs/MakeInc.def` memaksa `arm64e` untuk semua build
 ARM64 kalau `EMBEDDED_DEVICE_MAP` tidak ada. `arm64e` = ABI dengan Pointer
@@ -95,10 +96,33 @@ pertama berasal dari `MACHINE_FLAGS` di `makedefs/MakeInc.def` sehingga
 terdefinisi di **setiap** unit kompilasi — `proc_reg.h` dan `IOStartIOKit.cpp`
 tidak selalu meng-include `board_config.h`.
 
+**0009 — dua hal yang sudah diubah upstream.** Setelah 0008, error yang tersisa
+bukan lagi soal tissot sama sekali, melainkan dua konstruksi yang dipakai source
+8020 dan sudah tidak diterima clang 26 maupun `iig` dari Xcode 26. Keduanya
+sudah diperbaiki Apple di XNU yang lebih baru, jadi patch ini **backport**, bukan
+akal-akalan lokal:
+
+- `uio_stackbuf_t` dulu `typedef char __attribute__((aligned(8)))`. Char
+  ukurannya 1 byte, jadi `uio_stackbuf_t x[N]` adalah array yang ukuran
+  elemennya bukan kelipatan alignment-nya — clang 26 menolaknya sebagai *hard
+  error*, dan itu mematikan 36 deklarasi di 14 file. Upstream menggantinya
+  dengan makro `UIO_STACKBUF(name, niov)` yang mendeklarasikan array `uint64_t`
+  dengan jumlah byte yang sama. Yang **tidak** dilakukan: memperbesar elemen
+  jadi 8 byte, karena itu membuat dua buffer tak-terbatas ikut membengkak 8x —
+  `uipc_syscalls.c` ("1 KB") jadi 8 KB dari stack kernel 16 KB, dan VLA
+  seukuran `msg_iovlen` di `kpi_socket.c` jadi 8x lipat.
+- `struct IORPC` di 8020 tidak punya `kernelContent`, sementara `iig` Xcode 26
+  menghasilkan kode yang memakainya (`OSObject.iig.cpp` dibuat saat build).
+  Upstream menambah field itu di balik `#ifdef KERNEL`; patch ini menyalinnya
+  ke kedua salinan header (`IOKit/` dan `DriverKit/`).
+
+`UIO_SIZEOF` sendiri tidak disentuh: makro itu juga dipakai sebagai **jumlah
+byte** (`kalloc_data(UIO_SIZEOF(...))`), jadi artinya tidak boleh berubah.
+
 ## Cara pakai
 
 ```bash
-# unduh source + terapkan 0001, 0002, 0003
+# unduh source + terapkan 0001..0009
 ./xnu/apply-8020.sh
 
 # verifikasi toolchain (akan melaporkan yang kurang)

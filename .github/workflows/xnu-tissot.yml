@@ -16,7 +16,7 @@ name: xnu-tissot
 #   Kamu tidak perlu punya Mac: repo publik dapat menit macOS gratis.
 #
 # Tiga job:
-#   patches  (ubuntu-latest)  — verifikasi patch 0001..0008 apply bersih ke
+#   patches  (ubuntu-latest)  — verifikasi patch 0001..0009 apply bersih ke
 #                               source XNU pristine. Cepat, tanpa macOS.
 #                               Ini yang menangkap patch rusak lebih dulu.
 #   kernel   (macos-latest)   — build kernel ARM64 sungguhan (mach.* TISSOT).
@@ -30,6 +30,17 @@ name: xnu-tissot
 # ============================================================================
 
 on:
+  # Build XNU butuh Mach-O: xcrun, ld64, ctf_insert, kextsymboltool, SDK
+  # iPhoneOS. Itu semua biner macOS, jadi runner macOS-lah yang dipakai —
+  # build di WSL/Linux tidak bisa menyelesaikan tahap kompilasi.
+  push:
+    paths:
+      - "xnu/patches-8020/**"
+      - "xnu/apply-8020.sh"
+      - "xnu-build-arm64.sh"
+      - "tools/**"
+      - "Makefile"
+      - ".github/workflows/xnu-tissot.yml"
   workflow_dispatch:
     inputs:
       config:
@@ -46,12 +57,6 @@ on:
         required: true
         default: true
         type: boolean
-  # Sengaja TIDAK ada trigger `push`.
-  #
-  # Build kernel sekarang dijalankan lokal lewat `bash tools/wsl-build.sh`
-  # (atau di macOS lewat `./xnu-build-arm64.sh`). Workflow ini disisakan
-  # hanya untuk dijalankan manual dari tab Actions kalau suatu saat butuh
-  # runner macOS lagi. Tanpa blok `push`, commit tidak memicu build apa pun.
 # Satu build pada satu waktu per ref; push baru membatalkan yang lama.
 concurrency:
   group: xnu-tissot-${{ github.ref }}
@@ -64,7 +69,7 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — verifikasi patch series (Linux, tanpa macOS)
   #
-  # Mengunduh xnu-8020.140.41, menerapkan 0001..0008 berurutan, lalu memastikan
+  # Mengunduh xnu-8020.140.41, menerapkan 0001..0009 berurutan, lalu memastikan
   # setiap penanda patch benar-benar ada. Kalau ada yang gagal di sini, build
   # kernel di job 2 pasti juga gagal — jadi ini gerbang cepat.
   # --------------------------------------------------------------------------
@@ -125,6 +130,11 @@ jobs:
           echo "--- patch 0008: CPU type Cortex-A53 ---"
           check osfmk/arm/proc_reg.h                 ARM64_BOARD_CONFIG_TISSOT
           check iokit/Kernel/IOStartIOKit.cpp        '!defined(ARM64_BOARD_CONFIG_TISSOT)'
+          echo "--- patch 0009: backport UIO_STACKBUF + IORPC.kernelContent ---"
+          check bsd/sys/uio_internal.h               'UIO_STACKBUF(name, niov)'
+          check bsd/dev/vn/vn.c                      'UIO_STACKBUF(uio_buf, 1)'
+          check iokit/IOKit/IORPC.h                  kernelContent
+          check iokit/DriverKit/IORPC.h              kernelContent
           if grep -q 'enable-trivial-auto-var-init-zero' "$SRC/makedefs/MakeInc.def"; then
             echo '  FAIL  flag clang lama masih ada'; exit 1
           fi
@@ -278,21 +288,25 @@ jobs:
           CONFIG="${{ github.event.inputs.config || 'DEVELOPMENT' }}"
           echo "config=$CONFIG" >> "$GITHUB_ENV"
           set +e
-          ./xnu-build-arm64.sh --force --config "$CONFIG" --jobs 4 2>&1 | tee build.log
-          rc=${PIPESTATUS[0]}
 
-          # XNU 8020 (2021) + clang yang jauh lebih baru: -Weverything +
-          # -Werror membuat warning baru jadi error dan menutupi error asli.
-          # Percobaan kedua dengan BUILD_WERROR=0 (knob resmi XNU) memisahkan
-          # keduanya. Build inkremental, jadi tidak mengulang dari nol.
-          if [ "$rc" -ne 0 ] && grep -q -- "-Werror" build.log; then
-            echo ""
-            echo "================================================================"
-            echo ">>> gagal dengan -Werror — mengulang dengan BUILD_WERROR=0"
-            echo "================================================================"
-            ./xnu-build-arm64.sh --force --config "$CONFIG" --jobs 4 --no-werror 2>&1 | tee build-retry.log
-            rc=${PIPESTATUS[0]}
-          fi
+          # Dua knob sekaligus:
+          #
+          # BUILD_WERROR=0  XNU 8020 (2021) + clang 26: -Weverything membuat
+          #                 warning baru, dan -Werror mengubahnya jadi error
+          #                 yang menutupi error asli. BUILD_WERROR=0 adalah
+          #                 knob resmi XNU untuk itu.
+          #
+          # -k              make lanjut ke file lain setelah satu file gagal.
+          #                 Tanpa ini satu run cuma memperlihatkan satu file
+          #                 bermasalah; dengan ini seluruh daftar error
+          #                 keluar sekali jalan.
+          #
+          # Dulu ada percobaan kedua dengan --no-werror setelah percobaan
+          # pertama gagal karena -Werror. Sekarang percobaan pertama sudah
+          # memakai --no-werror, jadi tidak perlu diulang.
+          ./xnu-build-arm64.sh --force --config "$CONFIG" --jobs 4 \
+              --no-werror --keep-going 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
 
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo ">>> exit code: $rc"

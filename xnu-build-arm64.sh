@@ -22,6 +22,8 @@
 #   SDKROOT=iphoneos ./xnu-build-arm64.sh
 #   ./xnu-build-arm64.sh --config RELEASE --jobs 8
 #   ./xnu-build-arm64.sh --no-werror        # WERROR= (clang baru, warning lama)
+#   ./xnu-build-arm64.sh --keep-going       # make -k: lanjut walau ada file gagal,
+#                                           # supaya semua error muncul sekali jalan
 # ============================================================================
 set -u
 
@@ -34,6 +36,7 @@ JOBS=""
 MODE="build"
 FORCE=0
 NOWERROR=0
+KEEPGOING=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -41,6 +44,7 @@ while [ $# -gt 0 ]; do
         --print)     MODE="print" ;;
         --force)     FORCE=1 ;;
         --no-werror) NOWERROR=1 ;;
+        --keep-going) KEEPGOING=1 ;;
         --config) CONFIG="$2"; shift ;;
         --jobs)   JOBS="$2"; shift ;;
         -h|--help)
@@ -61,6 +65,7 @@ echo "  source : $SRC"
 echo "  config : $CONFIG"
 echo "  jobs   : $JOBS"
 [ "$NOWERROR" -eq 1 ] && echo "  WERROR : dimatikan (--no-werror)"
+[ "$KEEPGOING" -eq 1 ] && echo "  make   : -k (lanjut walau ada yang gagal)"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -187,6 +192,13 @@ fi
 # which is what GitHub's macOS runners use. Reassign instead.
 if [ "$NOWERROR" -eq 1 ]; then
     MAKE_CMD=("${MAKE_CMD[@]}" BUILD_WERROR=0)
+fi
+
+# -k: keep building the other translation units after one fails. Without it a
+# single bad file hides every error behind it, and each CI run only ever shows
+# the first problem. With it, one run reports all of them.
+if [ "$KEEPGOING" -eq 1 ]; then
+    MAKE_CMD=("${MAKE_CMD[@]}" -k)
 fi
 
 echo "  SDK    : ${SDK_PATH:-$SDK_NAME}"

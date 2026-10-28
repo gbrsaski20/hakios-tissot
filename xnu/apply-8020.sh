@@ -178,6 +178,11 @@ need_grep "pexpert/pexpert/arm64/Makefile" "TISSOT.h"
 # patch 0008 (CPU type Cortex-A53 di proc_reg.h)
 need_grep "osfmk/arm/proc_reg.h" "ARM64_BOARD_CONFIG_TISSOT"
 need_grep "iokit/Kernel/IOStartIOKit.cpp" "!defined(ARM64_BOARD_CONFIG_TISSOT)"
+# patch 0009 (backport upstream: UIO_STACKBUF + IORPC.kernelContent)
+need_grep "bsd/sys/uio_internal.h" "UIO_STACKBUF(name, niov)"
+need_absent "bsd/sys/uio_internal.h" "aligned(_Alignof(union iovecs))"
+need_grep "bsd/dev/vn/vn.c" "UIO_STACKBUF(uio_buf, 1)"
+need_grep "iokit/IOKit/IORPC.h" "kernelContent"
 
 if [ "$fail" -ne 0 ]; then
     echo ""

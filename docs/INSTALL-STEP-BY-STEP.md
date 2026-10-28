@@ -142,7 +142,7 @@ bash tools/wsl-check.sh            # hanya pemeriksaan, tanpa mengubah apa pun
 ```
 
 `wsl-build.sh` menjalankan semuanya berurutan: cek lingkungan dan toolchain,
-apply patch 0001–0008, cek penanda, cek ABI `arm64` (bukan `arm64e`) dan
+apply patch 0001–0009, cek penanda, cek ABI `arm64` (bukan `arm64e`) dan
 `-mcpu=cortex-a53`, rakit ADT + DTB, lalu kompilasi kalau toolchain-nya ada.
 
 Kode keluarnya membedakan dua hal: `1` berarti ada langkah yang benar-benar
@@ -203,7 +203,7 @@ Tiga job berjalan berurutan:
 
 | Job | Runner | Waktu | Isi |
 |-----|--------|-------|-----|
-| `patches` | ubuntu | ~2 mnt | apply 0001–0008 + cek 18 penanda + cek `arm64` (bukan `arm64e`) + `-mcpu=cortex-a53` + uji pipeline image |
+| `patches` | ubuntu | ~2 mnt | apply 0001–0009 + cek 20 penanda + cek `arm64` (bukan `arm64e`) + `-mcpu=cortex-a53` + uji pipeline image |
 | `kernel` | macOS | ~20–40 mnt | `make ... ARM64 TISSOT` sungguhan |
 | `package` | ubuntu | ~1 mnt | rakit `tissot-boot.img` dari kernel hasil job 2 |
 
@@ -265,7 +265,7 @@ Catatan umum:
 - Error "unknown argument: -Wno-..." → itu warning clang baru; jalankan
   `./xnu-build-arm64.sh --no-werror` untuk melihat error sesungguhnya.
 
-Patch 0001–0008 sudah ada. Kalau build gagal di file tertentu, **file itu
+Patch 0001–0009 sudah ada. Kalau build gagal di file tertentu, **file itu
 adalah petunjuk patch berikutnya** — bukan tanda fondasinya salah.
 
 ---

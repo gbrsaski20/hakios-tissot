@@ -16,7 +16,7 @@ work.
 ### How to verify
 
 ```bash
-# Fetch xnu-8020.140.41 and apply patches 0001..0008
+# Fetch xnu-8020.140.41 and apply patches 0001..0009
 ./xnu/apply-8020.sh
 # xnu-src-8020/ then holds all original notices plus our changes
 ```

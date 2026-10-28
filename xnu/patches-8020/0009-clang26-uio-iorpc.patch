@@ -1,0 +1,487 @@
+Backport two upstream XNU changes that current clang and iig require.
+
+Run 40514006543 got through board_config.h and proc_reg.h and reached
+~12,000 lines of log. What is left is not tissot-specific at all: two
+constructs that the 8020 sources use, that clang 26 and the Xcode 26 iig
+no longer accept. Both have already been changed upstream, so this patch
+is a straight backport rather than a local workaround.
+
+1. uio_stackbuf_t -> UIO_STACKBUF (bsd/sys/uio_internal.h and 14 files)
+
+    uio_internal.h used to declare:
+
+        typedef char __attribute__((aligned(_Alignof(union iovecs))))
+            uio_stackbuf_t;
+
+    Every user then wrote `uio_stackbuf_t uio_buf[UIO_SIZEOF(n)]`. A char
+    has size 1, so that is an array whose element size is not a multiple
+    of its alignment (8). clang 26 rejects it as a hard error, so all 36
+    declarations across 14 files failed:
+
+        vn.c:255:25: error: size of array element of type
+        'uio_stackbuf_t' (aka 'char') (1 bytes) isn't a multiple of its
+        alignment (8 bytes)
+
+    Upstream replaced the typedef with a macro that declares a uint64_t
+    array of the same byte size:
+
+        #define UIO_STACKBUF(name, niov) \
+            uint64_t name[P2ROUNDUP(UIO_SIZEOF(niov), sizeof(uint64_t)) \
+                / sizeof(uint64_t)]
+
+    8-byte elements, 8-byte alignment, same number of bytes as before --
+    the declarations become `UIO_STACKBUF(uio_buf, 1);` and the call sites
+    (`&uio_buf[0]`, `sizeof(uio_buf)`) keep working unchanged.
+
+    Deliberately NOT done: enlarging the element instead of replacing the
+    macro. `uio_stackbuf_t` would then be 8 bytes and every array would
+    cover 8x the bytes, which is fatal for the two unbounded cases --
+    uipc_syscalls.c's "1 KB" buffer would need 8 KB of a 16 KB kernel
+    stack, and kpi_socket.c's msg_iovlen-sized VLA would grow to 8x a
+    caller-controlled size.
+
+    UIO_SIZEOF itself is untouched: it is also used as a byte count
+    (`kalloc_data(UIO_SIZEOF(...))`), so its meaning must not change.
+
+2. IORPC.kernelContent (iokit/IOKit/IORPC.h, iokit/DriverKit/IORPC.h)
+
+    The iig that ships with Xcode 26 generates code for a newer IORPC
+    than 8020 has, and DriverKit/OSObject.iig.cpp is generated during the
+    build:
+
+        DriverKit/OSObject.iig.cpp:277:30: error: no member named
+        'kernelContent' in 'IORPC'
+
+    Upstream added exactly that member, guarded:
+
+        #ifdef KERNEL
+                IORPCMessage     * kernelContent;
+        #endif /* KERNEL */
+
+    IORPCMessage is already declared earlier in the same header, so only
+    the field needs backporting. Both copies of the header are patched
+    because they are separate files with identical content, and both are
+    exported (IOKit/ and DriverKit/).
+
+--- a/bsd/dev/vn/vn.c
++++ b/bsd/dev/vn/vn.c
+@@ -252,7 +252,7 @@
+ {
+ 	uio_t           auio;
+ 	int             error;
+-	uio_stackbuf_t  uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	auio = uio_createwithbuffer(1, offset, UIO_SYSSPACE, op,
+ 	    &uio_buf[0], sizeof(uio_buf));
+--- a/bsd/kern/decmpfs.c
++++ b/bsd/kern/decmpfs.c
+@@ -487,7 +487,7 @@
+ 	const bool no_additional_data = ((cp != NULL)
+ 	    && (cp->cmp_type != 0)
+ 	    && (cp->cmp_minimal_xattr != 0));
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	decmpfs_header *hdr = NULL;
+ 
+ 	/*
+--- a/bsd/kern/kern_descrip.c
++++ b/bsd/kern/kern_descrip.c
+@@ -2202,7 +2202,7 @@
+ 	int flags = 0;
+ 	int spacetype;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	struct vfs_context context = *(vfs_context_current());
+ 
+ 	p = current_proc();
+--- a/bsd/kern/kpi_socket.c
++++ b/bsd/kern/kpi_socket.c
+@@ -725,7 +725,7 @@
+ 	int error = 0;
+ 	user_ssize_t length = 0;
+ 	struct sockaddr *fromsa = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF((msg != NULL) ? msg->msg_iovlen : 0)];
++	UIO_STACKBUF(uio_buf, (msg != NULL) ? msg->msg_iovlen : 0);
+ 
+ 	if (sock == NULL) {
+ 		return EINVAL;
+--- a/bsd/kern/sys_generic.c
++++ b/bsd/kern/sys_generic.c
+@@ -365,7 +365,7 @@
+ 	uio_t auio;
+ 	user_ssize_t bytecnt;
+ 	int error = 0;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (nbyte > INT_MAX) {
+ 		return EINVAL;
+@@ -620,7 +620,7 @@
+ 	uio_t auio;
+ 	int error = 0;
+ 	user_ssize_t bytecnt;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (nbyte > INT_MAX) {
+ 		*retval = 0;
+--- a/bsd/kern/uipc_syscalls.c
++++ b/bsd/kern/uipc_syscalls.c
+@@ -3528,7 +3528,7 @@
+ 		mbuf_t  m0 = NULL, m;
+ 		unsigned int    nbufs = SFUIOBUFS, i;
+ 		uio_t   auio;
+-		uio_stackbuf_t    uio_buf[UIO_SIZEOF(SFUIOBUFS)]; /* 1 KB !!! */
++		UIO_STACKBUF(uio_buf, SFUIOBUFS); /* 1 KB !!! */
+ 		size_t  uiolen;
+ 		user_ssize_t    rlen;
+ 		off_t   pgoff;
+--- a/bsd/nfs/nfs_serv.c
++++ b/bsd/nfs/nfs_serv.c
+@@ -771,7 +771,7 @@
+ 	struct nfsm_chain *nmreq, nmrep;
+ 	mbuf_t mpath, mp;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(4)];
++	UIO_STACKBUF(uio_buf, 4);
+ 	char *uio_bufp = &uio_buf[0];
+ 	int uio_buflen = UIO_SIZEOF(4);
+ 
+@@ -920,7 +920,7 @@
+ 	struct vnode_attr vattr, *vap = &vattr;
+ 	off_t off;
+ 	uid_t saved_uid;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(0)];
++	UIO_STACKBUF(uio_buf, 0);
+ 	struct nfsm_chain *nmreq, nmrep;
+ 
+ 	error = 0;
+@@ -3573,7 +3573,7 @@
+ 	struct nfs_export *nx = NULL;
+ 	struct nfs_export_options *nxo = NULL;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	struct nfsm_chain *nmreq, nmrep;
+ 	__unused const int nfs_vers = nd->nd_vers;
+ 	assert(nd->nd_vers == NFS_VER2 || nd->nd_vers == NFS_VER3);
+@@ -4229,7 +4229,7 @@
+ 	struct nfs_export *nx;
+ 	struct nfs_export_options *nxo;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	int len, nlen, rem, xfer, error, attrerr;
+ 	int siz, count, fullsiz, eofflag, nentries;
+ 	u_quad_t off, toff, verf = 0;
+@@ -4476,7 +4476,7 @@
+ 	struct nfs_export *nx;
+ 	struct nfs_export_options *nxo;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	struct vnode_attr attr, va, *vap = &va;
+ 	int len, nlen, rem, xfer, error, attrerr, gotfh, gotattr;
+ 	int siz, dircount, maxcount, fullsiz, eofflag, dirlen, nentries, isdotdot;
+--- a/bsd/sys/uio_internal.h
++++ b/bsd/sys/uio_internal.h
+@@ -162,15 +162,38 @@
+ 
+ /*
+  * UIO_SIZEOF - return the amount of space a uio_t requires to
+- *	contain the given number of iovecs.  Use this macro to
+- *  create a stack buffer (of type uio_stackbuf_t to ensure
+- *  alignment requirements) that can be passed to
+- *  uio_createwithbuffer.
++ *	contain the given number of iovecs.
+  */
+ #define UIO_SIZEOF( a_iovcount ) \
+ 	( sizeof(struct uio) + UIO_SIZEOF_IOVS(a_iovcount) )
+ 
+-typedef char __attribute__((aligned(_Alignof(union iovecs)))) uio_stackbuf_t;
++/*
++ * UIO_STACKBUF - use this macro to declare a stack buffer with the
++ *	appropriate size an alignment for the given number of iovecs.
++ *	The resulting buffer can then be passed to uio_createwithbuffer().
++ *
++ * This replaces the uio_stackbuf_t typedef this header used to carry:
++ *
++ *	typedef char __attribute__((aligned(8))) uio_stackbuf_t;
++ *
++ * A char has size 1, so `uio_stackbuf_t x[N]` asked for an array whose
++ * element size (1 byte) is not a multiple of its alignment (8 bytes).
++ * Older clang accepted that; current clang rejects it outright:
++ *
++ *	size of array element of type 'uio_stackbuf_t' (aka 'char')
++ *	(1 bytes) isn't a multiple of its alignment (8 bytes)
++ *
++ * A uint64_t array keeps the 8-byte alignment, has an element size that
++ * is a multiple of it, and covers the same number of bytes, so it is a
++ * drop-in replacement for every caller. This is the shape upstream XNU
++ * moved to.
++ */
++#ifndef P2ROUNDUP
++#define P2ROUNDUP(x, align)	(-(-(x) & -(align)))
++#endif
++#define UIO_STACKBUF(name, niov) \
++	uint64_t name[P2ROUNDUP(UIO_SIZEOF(niov), sizeof(uint64_t)) \
++	    / sizeof(uint64_t)]
+ 
+ #define UIO_IS_USER_SPACE32( a_uio_t )  \
+ 	( (a_uio_t)->uio_segflg == UIO_USERSPACE32 || (a_uio_t)->uio_segflg == UIO_PHYS_USERSPACE32 || \
+--- a/bsd/vfs/vfs_attrlist.c
++++ b/bsd/vfs/vfs_attrlist.c
+@@ -876,7 +876,7 @@
+ setattrlist_setfinderinfo(vnode_t vp, char *fndrinfo, struct vfs_context *ctx)
+ {
+ 	uio_t   auio;
+-	uio_stackbuf_t    uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	int     error;
+ 
+ 	if ((auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_WRITE, uio_buf, sizeof(uio_buf))) == NULL) {
+@@ -1827,7 +1827,7 @@
+ 		error = 0;
+ 		if (vp && !is_bulk) {
+ 			uio_t   auio;
+-			uio_stackbuf_t    uio_buf[UIO_SIZEOF(1)];
++			UIO_STACKBUF(uio_buf, 1);
+ 
+ 			if ((auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE,
+ 			    UIO_READ, uio_buf, sizeof(uio_buf))) == NULL) {
+@@ -3090,7 +3090,7 @@
+ 	int             pack_invalid;
+ 	int             vtype = 0;
+ 	uio_t           auio;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	// must be true for fork attributes to be used as new common attributes
+ 	const int use_fork = (options & FSOPT_ATTR_CMN_EXTENDED) != 0;
+ 
+@@ -3444,7 +3444,7 @@
+     int *eofflagp)
+ {
+ 	uio_t rdir_uio;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	size_t rdirbufsiz;
+ 	size_t rdirbufused;
+ 	int eofflag;
+@@ -4018,7 +4018,7 @@
+ 	enum uio_seg segflg;
+ 	int count;
+ 	uio_t auio = NULL;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	kauth_action_t action;
+ 	int eofflag;
+ 	uint64_t options;
+--- a/bsd/vfs/vfs_lookup.c
++++ b/bsd/vfs/vfs_lookup.c
+@@ -1666,7 +1666,7 @@
+ 	int error;
+ 	char *cp;               /* pointer into pathname argument */
+ 	uio_t auio;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	int need_newpathbuf;
+ 	u_int linklen;
+ 	struct componentname *cnp = &ndp->ni_cnd;
+--- a/bsd/vfs/vfs_quota.c
++++ b/bsd/vfs/vfs_quota.c
+@@ -382,7 +382,7 @@
+ 	off_t file_size;
+ 	uio_t auio;
+ 	int error = 0;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	context.vc_thread = current_thread();
+ 	context.vc_ucred = qfp->qf_cred;
+@@ -440,7 +440,7 @@
+ 	struct dqfilehdr header;
+ 	struct vfs_context context;
+ 	uio_t auio;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_READ,
+ 	    &uio_buf[0], sizeof(uio_buf));
+@@ -767,7 +767,7 @@
+ 	int i, skip, last;
+ 	u_int32_t mask;
+ 	int error = 0;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 
+ 	qf_lock(qfp);
+@@ -986,7 +986,7 @@
+ 	struct dqblk dqb, *dqblkp;
+ 	uio_t auio;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (dq->dq_id == 0) {
+ 		dq->dq_flags &= ~DQ_MOD;
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -10316,7 +10316,7 @@
+ 	uio_t auio = NULL;
+ 	int eofflag, siz = UIO_BUFF_SIZE, alloc_size = 0, nentries = 0;
+ 	int open_flag = 0, full_erase_flag = 0;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	char *rbuf = NULL;
+ 	void *dir_pos;
+ 	void *dir_end;
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -6740,7 +6740,7 @@
+ 	uio_t auio;
+ 	int error;
+ 	struct nameidata nd;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	bool put_vnode;
+ 
+ 	if (bufsize > INT32_MAX) {
+@@ -9691,7 +9691,7 @@
+ 	int spacetype = proc_is64bit(vfs_context_proc(&context)) ? UIO_USERSPACE64 : UIO_USERSPACE32;
+ 	off_t loff;
+ 	int error, numdirent;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ get_from_fd:
+ 	error = fp_getfvp(vfs_context_proc(&context), fd, &fp, &vp);
+@@ -9987,7 +9987,7 @@
+ 	struct attrlist attributelist;
+ 	vfs_context_t ctx = vfs_context_current();
+ 	int fd = uap->fd;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	kauth_action_t action;
+ 
+ 	AUDIT_ARG(fd, fd);
+@@ -10328,7 +10328,7 @@
+ 	size_t mallocsize;
+ 	uint32_t nameiflags;
+ 	vfs_context_t ctx = vfs_context_current();
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	/* Start by copying in fsearchblock parameter list */
+ 	if (IS_64BIT_PROCESS(p)) {
+@@ -12237,7 +12237,7 @@
+ 	size_t namelen;
+ 	u_int32_t nameiflags;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (uap->options & (XATTR_NOSECURITY | XATTR_NODEFAULT)) {
+ 		return EINVAL;
+@@ -12321,7 +12321,7 @@
+ 	size_t attrsize = 0;
+ 	size_t namelen;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
+ 		return EINVAL;
+@@ -12369,7 +12369,7 @@
+ struct setxattr_ctx {
+ 	struct nameidata nd;
+ 	char attrname[XATTR_MAXNAMELEN + 1];
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ };
+ 
+ /*
+@@ -12458,7 +12458,7 @@
+ 	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
+ 	size_t namelen;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
+ 		return EINVAL;
+@@ -12619,7 +12619,7 @@
+ 	size_t attrsize = 0;
+ 	u_int32_t nameiflags;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (uap->options & (XATTR_NOSECURITY | XATTR_NODEFAULT)) {
+ 		return EINVAL;
+@@ -12661,7 +12661,7 @@
+ 	int spacetype = proc_is64bit(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
+ 	size_t attrsize = 0;
+ 	int error;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
+ 		return EINVAL;
+--- a/bsd/vfs/vfs_vnops.c
++++ b/bsd/vfs/vfs_vnops.c
+@@ -926,7 +926,7 @@
+ 	int spacetype;
+ 	struct vfs_context context;
+ 	int error = 0;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 
+ 	context.vc_thread = current_thread();
+ 	context.vc_ucred = cred;
+--- a/iokit/DriverKit/IORPC.h
++++ b/iokit/DriverKit/IORPC.h
+@@ -222,6 +222,9 @@
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++#ifdef KERNEL
++	IORPCMessage     * kernelContent;
++#endif /* KERNEL */
+ };
+ typedef struct IORPC IORPC;
+ 
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -222,6 +222,9 @@
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++#ifdef KERNEL
++	IORPCMessage     * kernelContent;
++#endif /* KERNEL */
+ };
+ typedef struct IORPC IORPC;
+ 
+--- a/security/mac_vfs_subr.c
++++ b/security/mac_vfs_subr.c
+@@ -167,7 +167,7 @@
+ {
+ 	vfs_context_t ctx;
+ 	int options = XATTR_NOSECURITY;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	uio_t auio;
+ 	int error;
+ 
+@@ -198,7 +198,7 @@
+ {
+ 	vfs_context_t ctx = vfs_context_current();
+ 	int options = XATTR_NOSECURITY;
+-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
++	UIO_STACKBUF(uio_buf, 1);
+ 	uio_t auio;
+ 	int error;
+ 

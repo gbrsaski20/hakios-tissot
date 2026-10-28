@@ -76,9 +76,9 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 | `tools/wsl-check.sh` | Reproduksi job `patches` CI secara lokal di WSL/Linux (patch + penanda + image) |
 | `tools/build_kernel_placeholder_arm64.py` | Kernel ARM64 placeholder (uji pipeline) |
 | `devices/tissot/` | Profil device + `build-bootimage.sh` |
-| `xnu/patches-8020/` | Patch series 0001–0008 untuk XNU 8020 |
+| `xnu/patches-8020/` | Patch series 0001–0009 untuk XNU 8020 |
 | `xnu/apply-8020.sh` | Unduh source + apply patch + sanity check |
-| `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`, `--no-werror`) |
+| `xnu-build-arm64.sh` | Build driver (`--check`, `--print`, `--force`, `--no-werror`, `--keep-going`) |
 | `.github/workflows/xnu-tissot.yml` | CI: verifikasi patch → build kernel → rakit boot image |
 | `Makefile` | `make adt` / `make check` / `make tissot` |
 | `xnu8020-prep.bat`, `make-tissot.bat` | Launcher Windows |
@@ -91,7 +91,7 @@ otomatis. Di PC Windows kamu hanya menjalankan Python (rakit ADT + boot image).
 ```
 GitHub Actions                                        PC kamu (Windows)
 ──────────────────────────────────────────            ─────────────────
-job patches   (ubuntu)  patch 0001..0008 + audit      xnu8020-prep.bat
+job patches   (ubuntu)  patch 0001..0009 + audit      xnu8020-prep.bat
 job kernel    (macos)   make ... ARM64 TISSOT         make-tissot.bat
 job package   (ubuntu)  rakit boot image                        ↓
         ↓                                                     ↓
