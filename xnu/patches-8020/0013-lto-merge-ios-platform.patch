@@ -1,0 +1,11 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -982,7 +982,7 @@
+ ifeq ($(USE_LTO),1)
+ CFLAGS_GEN	+= -flto
+ CXXFLAGS_GEN	+= -flto
+-LDFLAGS_KERNEL_LTO	= -Wl,-mllvm,-inline-threshold=100
++LDFLAGS_KERNEL_LTO	= -Wl,-mllvm,-inline-threshold=100 $(DEPLOYMENT_LINKER_FLAGS)
+ LDFLAGS_KERNEL_GEN	+= $(LDFLAGS_KERNEL_LTO) -Wl,-object_path_lto,$(TARGET)/lto.o
+ LDFLAGS_NOSTRIP_FLAG = -rdynamic
+ LDFLAGS_KERNEL_STRIP_LTO = -Wl,-dead_strip,-no_dead_strip_inits_and_terms

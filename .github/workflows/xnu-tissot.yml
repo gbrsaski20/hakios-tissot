@@ -143,6 +143,8 @@ jobs:
           check EXTERNAL_HEADERS/os/firehose_buffer_private.h __firehose_buffer_tracepoint_reserve
           echo "--- patch 0012: flag platform linker ios ---"
           check makedefs/MakeInc.def 'DEPLOYMENT_LINKER_FLAGS)'
+          echo "--- patch 0013: flag platform di LTO merge ---"
+          check makedefs/MakeInc.def 'inline-threshold=100 $(DEPLOYMENT_LINKER_FLAGS)'
           if grep -q 'enable-trivial-auto-var-init-zero' "$SRC/makedefs/MakeInc.def"; then
             echo '  FAIL  flag clang lama masih ada'; exit 1
           fi
