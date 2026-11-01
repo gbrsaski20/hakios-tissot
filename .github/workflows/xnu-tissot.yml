@@ -224,7 +224,9 @@ jobs:
   # --------------------------------------------------------------------------
   kernel:
     name: "Build kernel (macOS runner)"
-    runs-on: macos-latest
+    # Pin the Xcode generation; macos-latest can move SDK/linker behavior
+    # underneath this older XNU 8020 toolchain.
+    runs-on: macos-15
     needs: patches
     timeout-minutes: 120
 
@@ -319,7 +321,10 @@ jobs:
             echo "libdispatch source was not extracted"
             exit 1
           fi
-          xcodebuild install -sdk macosx ARCHS=arm64 VALID_ARCHS=arm64 \
+          # Match the iOS platform of the final kernel link. Building this
+          # archive with macosx marks its object files as macOS and ld rejects
+          # them when linking the iOS kernel.
+          xcodebuild install -sdk iphoneos ARCHS=arm64 VALID_ARCHS=arm64 \
             -target libfirehose_kernel PRODUCT_NAME=firehose_kernel \
             DSTROOT="$DEPS/firehose-dst" -project "$DISPATCH_SRC/libdispatch.xcodeproj"
 
