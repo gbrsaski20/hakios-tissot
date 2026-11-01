@@ -294,6 +294,45 @@ jobs:
           chmod +x xnu/apply-8020.sh xnu-build-arm64.sh
           ./xnu/apply-8020.sh
 
+      # XNU 8020 links libfirehose_kernel, which is built from Apple's
+      # matching libdispatch source. The iPhoneOS SDK does not ship this
+      # archive, so build it on the runner and stage it into SDKROOT.
+      - name: Siapkan dependency libfirehose_kernel
+        run: |
+          set -euo pipefail
+          MACOS_SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          DEPS="$RUNNER_TEMP/xnu-deps"
+          mkdir -p "$DEPS"
+
+          # Public XNU instructions require installed XNU headers before
+          # building libfirehose_kernel.
+          make -C xnu-src-8020 SDKROOT=macosx ARCH_CONFIGS=ARM64 installhdrs
+          sudo ditto xnu-src-8020/BUILD/dst "$MACOS_SDK"
+
+          DISPATCH_TAG="libdispatch-1325.120.2"
+          curl -fL "https://github.com/apple-oss-distributions/libdispatch/archive/refs/tags/${DISPATCH_TAG}.tar.gz" \
+            -o "$DEPS/libdispatch.tar.gz"
+          tar -xzf "$DEPS/libdispatch.tar.gz" -C "$DEPS"
+          DISPATCH_SRC="$(find "$DEPS" -maxdepth 1 -type d -name 'libdispatch-*' | head -1)"
+          if [ -z "$DISPATCH_SRC" ]; then
+            echo "libdispatch source was not extracted"
+            exit 1
+          fi
+          xcodebuild install -sdk macosx ARCHS=arm64 VALID_ARCHS=arm64 \
+            -target libfirehose_kernel PRODUCT_NAME=firehose_kernel \
+            DSTROOT="$DEPS/firehose-dst" -project "$DISPATCH_SRC/libdispatch.xcodeproj"
+
+          FIREHOSE="$DEPS/firehose-dst/usr/local/lib/kernel/libfirehose_kernel.a"
+          if [ ! -f "$FIREHOSE" ]; then
+            echo "libfirehose archive not produced at $FIREHOSE"
+            find "$DEPS/firehose-dst" -name '*firehose*.a' -print
+            exit 1
+          fi
+          sudo mkdir -p "$IOS_SDK/usr/local/lib/kernel"
+          sudo install -m 0644 "$FIREHOSE" "$IOS_SDK/usr/local/lib/kernel/libfirehose_kernel.a"
+          echo "Staged $IOS_SDK/usr/local/lib/kernel/libfirehose_kernel.a"
+
       # Build dibuat tidak menggagalkan job di sini, supaya langkah ringkasan
       # dan upload artefak di bawah tetap jalan. Status akhirnya ditentukan
       # oleh langkah "Nilai hasil build" di paling bawah.
