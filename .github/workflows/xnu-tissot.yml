@@ -312,6 +312,13 @@ jobs:
           make -C xnu-src-8020 SDKROOT=macosx ARCH_CONFIGS=ARM64 installhdrs
           sudo ditto xnu-src-8020/BUILD/dst "$MACOS_SDK"
 
+          # libfirehose_kernel needs XNU's private atomic headers. The normal
+          # installhdrs target exports public headers only, so stage this
+          # matching private header directory under the SDK's local includes.
+          sudo mkdir -p "$IOS_SDK/usr/local/include"
+          sudo ditto xnu-src-8020/libkern/os "$IOS_SDK/usr/local/include/os"
+          test -f "$IOS_SDK/usr/local/include/os/atomic_private.h"
+
           DISPATCH_TAG="libdispatch-1325.120.2"
           curl -fL "https://github.com/apple-oss-distributions/libdispatch/archive/refs/tags/${DISPATCH_TAG}.tar.gz" \
             -o "$DEPS/libdispatch.tar.gz"
