@@ -149,6 +149,8 @@ jobs:
           check makedefs/MakeInc.def 'arm64-apple-ios15.0'
           echo "--- patch 0015: version.o non-LTO + iOS ---"
           check makedefs/MakeInc.kernel 'version.o_CFLAGS_ADD'
+          echo "--- patch 0016: explicit iOS target in LTO link ---"
+          check makedefs/MakeInc.def 'LDFLAGS_KERNEL_LTO.*arm64-apple-ios15.0'
           if grep -q 'enable-trivial-auto-var-init-zero' "$SRC/makedefs/MakeInc.def"; then
             echo '  FAIL  flag clang lama masih ada'; exit 1
           fi
