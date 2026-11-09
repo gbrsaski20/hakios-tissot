@@ -19,6 +19,8 @@
 [PcdsFixedAtBuild.common]
   gQcomTokenSpaceGuid.PcdMipiFrameBufferWidth|1080
   gQcomTokenSpaceGuid.PcdMipiFrameBufferHeight|1920
+  # The scanout is 24 bit packed (3 bytes per pixel): the stripe geometry in photos of test patterns matches 24, not 32
+  gQcomTokenSpaceGuid.PcdMipiFrameBufferPixelBpp|24
 
   # Simple Init
   gSimpleInitTokenSpaceGuid.PcdGuiDefaultDPI|350

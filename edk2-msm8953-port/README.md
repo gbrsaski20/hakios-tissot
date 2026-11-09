@@ -18,3 +18,8 @@ submodules: edk2, edk2-platforms, SimpleInit incl. freetype, EFI_Binaries; if gi
 
 Try (RAM only, writes nothing): `fastboot boot boot-tissot.img` with the phone in fastboot mode, bootloader unlocked.
 If the screen stays dark, the likeliest causes are a wrong boot-image base/offset, the framebuffer address, or the memory map.
+
+## 24 bit framebuffer (found from photos of test patterns)
+Photos of stripe tests covered about 75% of the screen where a 32 bit buffer predicts 56%, which matches 3 bytes per pixel. So the
+earlier "hang" readings from those tests are unreliable (colours were mis-read). `tissot.dsc` sets PcdMipiFrameBufferPixelBpp|24 and
+`SimpleFbDxe` converts GOP's 32 bit shadow buffer into the 24 bit scanout. Byte order (BGR vs RGB) is a guess; the colour band test tells.
