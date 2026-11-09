@@ -1,0 +1,19 @@
+--- a/pexpert/pexpert/arm64/BCM2837.h
++++ b/pexpert/pexpert/arm64/BCM2837.h
+@@ -18,8 +18,16 @@
+  * The cores this kernel really runs on (Cortex-A55/A78, QEMU cortex-a76) are
+  * ARMv8.2: they set PSTATE.PAN on every exception entry, so the kernel must
+  * know to lift it around user memory accesses.
++ *
++ * A Cortex-A53 (the Snapdragon 625 of the Xiaomi Mi A1) is ARMv8.0 and has no PAN: `msr pan, #1`
++ * is an undefined instruction there, in arm_init, before the first line of output. Build with
++ * -DHAKIOS_NO_PAN (and without the +pan target feature, see xnu/optional/a53-no-pan.md) for such
++ * cores; the kernel then does what XNU does on the iPhones before the A10, and user memory is
++ * not shielded from kernel accesses by hardware.
+  */
++#ifndef HAKIOS_NO_PAN
+ #define __ARM_PAN_AVAILABLE__     1
++#endif
+ 
+ #define __ARM_ARCH__              8
+ #define __ARM_VMSA__              8
