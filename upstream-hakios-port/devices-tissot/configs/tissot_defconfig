@@ -1,0 +1,4 @@
+# HakiOS defconfig for the Xiaomi Mi A1 (tissot): the common kernel, the msm8953 family's facts, and this device's own.
+#include common_defconfig
+#include msm8953.config
+#include tissot.config

@@ -1,0 +1,13 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001A
+  PACKAGE_NAME                   = msm8953Pkg
+  PACKAGE_GUID                   = 5d1b0a3e-8953-4a21-b0f4-7c2a9e8d6a11
+  PACKAGE_VERSION                = 1.0
+
+[Includes]
+  Include
+
+[Guids]
+  gmsm8953PkgTokenSpaceGuid        = { 0x6a7c1f90, 0x8953, 0x4b21, {0xa4, 0x3e, 0x5c, 0x10, 0x9d, 0x2b, 0x77, 0x01 } }
+
+[PcdsFixedAtBuild.common]
