@@ -1,0 +1,263 @@
+00079000-0007917f : qusb_phy_base
+004a8000-004a8fff : tsens_srot_physical
+004a9000-004a9fff : tsens_tm_physical
+004ab000-004ab003 : pshold-base
+01000000-012fffff : pinctrl_regs
+0193f244-0193f247 : vls_clamp_reg
+01b00030-01b00033 : csiphy_clk_mux
+01b00038-01b0003b : csiphy_clk_mux
+01b00040-01b00043 : csiphy_clk_mux
+01b04000-01b040ff : cpp
+01b0c000-01b0ffff : cci
+01b18000-01b18017 : cpp_hw
+01b1c000-01b1c3ff : jpeg_hw
+01b30000-01b303ff : csid
+01b30400-01b307ff : csid
+01b30800-01b30bff : csid
+01b31000-01b314ff : ispif
+01b34000-01b34fff : csiphy
+01b35000-01b35fff : csiphy
+01b36000-01b36fff : csiphy
+01c00000-01c3ffff : kgsl-3d0
+01c40000-01c4ffff : /soc/arm,smmu-kgsl@1c40000
+01e00000-01e3ffff : base
+0200a000-0200c0ff : cnfg
+0200f000-0200ffff : core
+02400000-02bfffff : chnls
+02c00000-033fffff : obsrvr
+03800000-039fffff : intr
+04020000-0402003f : rmb_base
+04080000-040800ff : qdsp6_base
+06002000-06002fff : stm-base
+  06002000-06002fff : stm-base
+06003000-06003fff : tpda-base
+  06003000-06003fff : tpda-base
+06010000-06010fff : cti-base
+  06010000-06010fff : cti-base
+06011000-06011fff : cti-base
+  06011000-06011fff : cti-base
+06012000-06012fff : cti-base
+  06012000-06012fff : cti-base
+06013000-06013fff : cti-base
+  06013000-06013fff : cti-base
+06014000-06014fff : cti-base
+  06014000-06014fff : cti-base
+06015000-06015fff : cti-base
+  06015000-06015fff : cti-base
+06016000-06016fff : cti-base
+  06016000-06016fff : cti-base
+06017000-06017fff : cti-base
+  06017000-06017fff : cti-base
+06018000-06018fff : cti-base
+  06018000-06018fff : cti-base
+06019000-06019fff : cti-base
+  06019000-06019fff : cti-base
+0601a000-0601afff : cti-base
+  0601a000-0601afff : cti-base
+0601b000-0601bfff : cti-base
+  0601b000-0601bfff : cti-base
+0601c000-0601cfff : cti-base
+  0601c000-0601cfff : cti-base
+0601d000-0601dfff : cti-base
+  0601d000-0601dfff : cti-base
+0601e000-0601efff : cti-base
+  0601e000-0601efff : cti-base
+0601f000-0601ffff : cti-base
+  0601f000-0601ffff : cti-base
+06021000-06021fff : funnel-base
+  06021000-06021fff : funnel-base
+06026000-06026fff : replicator-base
+  06026000-06026fff : replicator-base
+06027000-06027fff : tmc-base
+  06027000-06027fff : tmc-base
+06028000-06028fff : tmc-base
+  06028000-06028fff : tmc-base
+06100000-06100fff : funnel-base
+  06100000-06100fff : funnel-base
+0610c000-0610cfff : cti-base
+  0610c000-0610cfff : cti-base
+06110000-06110fff : tpdm-base
+  06110000-06110fff : tpdm-base
+06120000-06120fff : funnel-base
+  06120000-06120fff : funnel-base
+06124000-06124fff : cti-base
+  06124000-06124fff : cti-base
+06128000-06128fff : cti-base
+  06128000-06128fff : cti-base
+06130000-06130fff : funnel-base
+  06130000-06130fff : funnel-base
+06132000-06132fff : funnel-base
+  06132000-06132fff : funnel-base
+06134000-06134fff : cti-base
+  06134000-06134fff : cti-base
+06139000-06139fff : cti-base
+  06139000-06139fff : cti-base
+0613c000-0613cfff : cti-base
+  0613c000-0613cfff : cti-base
+06198000-06198fff : cti-base
+  06198000-06198fff : cti-base
+06199000-06199fff : cti-base
+  06199000-06199fff : cti-base
+0619a000-0619afff : cti-base
+  0619a000-0619afff : cti-base
+0619b000-0619bfff : cti-base
+  0619b000-0619bfff : cti-base
+0619c000-0619cfff : /soc/etm@619c000
+0619d000-0619dfff : /soc/etm@619d000
+0619e000-0619efff : /soc/etm@619e000
+0619f000-0619ffff : /soc/etm@619f000
+061a1000-061a1fff : funnel-base
+  061a1000-061a1fff : funnel-base
+061b8000-061b8fff : cti-base
+  061b8000-061b8fff : cti-base
+061b9000-061b9fff : cti-base
+  061b9000-061b9fff : cti-base
+061ba000-061bafff : cti-base
+  061ba000-061bafff : cti-base
+061bb000-061bbfff : cti-base
+  061bb000-061bbfff : cti-base
+061bc000-061bcfff : /soc/etm@61bc000
+061bd000-061bdfff : /soc/etm@61bd000
+061be000-061befff : /soc/etm@61be000
+061bf000-061bffff : /soc/etm@61bf000
+061d0000-061d0fff : funnel-base
+  061d0000-061d0fff : funnel-base
+0700c100-0700c8cf : /soc/ssusb@7000000/dwc3@7000000
+07803000-0780afff : /soc/sdcc1ice@7803000
+07824900-07824dff : hc_mem
+07864900-07864dff : hc_mem
+07884000-078a2fff : /soc/qcom,sps-dma@7884000
+078b6000-078b65ff : 78b6000.i2c
+078b7000-078b75ff : 78b7000.i2c
+07af5000-07af55ff : 7af5000.i2c
+07af6000-07af65ff : spi_qsd
+09280000-093fffff : stm-stimulus-base
+0b017000-0b017fff : msm-watchdog
+10000000-849fffff : System RAM
+  10080000-119fffff : Kernel code
+  12000000-125b2fff : Kernel data
+86800000-86bfffff : System RAM
+8ef00000-9fefffff : System RAM
+9ff00000-9ff00fff : persistent_ram
+9ff01000-9ff01fff : persistent_ram
+9ff02000-9ff02fff : persistent_ram
+9ff03000-9ff03fff : persistent_ram
+9ff04000-9ff04fff : persistent_ram
+9ff05000-9ff05fff : persistent_ram
+9ff06000-9ff06fff : persistent_ram
+9ff07000-9ff07fff : persistent_ram
+9ff08000-9ff08fff : persistent_ram
+9ff09000-9ff09fff : persistent_ram
+9ff0a000-9ff0afff : persistent_ram
+9ff0b000-9ff0bfff : persistent_ram
+9ff0c000-9ff0cfff : persistent_ram
+9ff0d000-9ff0dfff : persistent_ram
+9ff0e000-9ff0efff : persistent_ram
+9ff0f000-9ff0ffff : persistent_ram
+9ff10000-9ff10fff : persistent_ram
+9ff11000-9ff11fff : persistent_ram
+9ff12000-9ff12fff : persistent_ram
+9ff13000-9ff13fff : persistent_ram
+9ff14000-9ff14fff : persistent_ram
+9ff15000-9ff15fff : persistent_ram
+9ff16000-9ff16fff : persistent_ram
+9ff17000-9ff17fff : persistent_ram
+9ff18000-9ff18fff : persistent_ram
+9ff19000-9ff19fff : persistent_ram
+9ff1a000-9ff1afff : persistent_ram
+9ff1b000-9ff1bfff : persistent_ram
+9ff1c000-9ff1cfff : persistent_ram
+9ff1d000-9ff1dfff : persistent_ram
+9ff1e000-9ff1efff : persistent_ram
+9ff1f000-9ff1ffff : persistent_ram
+9ff20000-9ff20fff : persistent_ram
+9ff21000-9ff21fff : persistent_ram
+9ff22000-9ff22fff : persistent_ram
+9ff23000-9ff23fff : persistent_ram
+9ff24000-9ff24fff : persistent_ram
+9ff25000-9ff25fff : persistent_ram
+9ff26000-9ff26fff : persistent_ram
+9ff27000-9ff27fff : persistent_ram
+9ff28000-9ff28fff : persistent_ram
+9ff29000-9ff29fff : persistent_ram
+9ff2a000-9ff2afff : persistent_ram
+9ff2b000-9ff2bfff : persistent_ram
+9ff2c000-9ff2cfff : persistent_ram
+9ff2d000-9ff2dfff : persistent_ram
+9ff2e000-9ff2efff : persistent_ram
+9ff2f000-9ff2ffff : persistent_ram
+9ff30000-9ff30fff : persistent_ram
+9ff31000-9ff31fff : persistent_ram
+9ff32000-9ff32fff : persistent_ram
+9ff33000-9ff33fff : persistent_ram
+9ff34000-9ff34fff : persistent_ram
+9ff35000-9ff35fff : persistent_ram
+9ff36000-9ff36fff : persistent_ram
+9ff37000-9ff37fff : persistent_ram
+9ff38000-9ff38fff : persistent_ram
+9ff39000-9ff39fff : persistent_ram
+9ff3a000-9ff3afff : persistent_ram
+9ff3b000-9ff3bfff : persistent_ram
+9ff3c000-9ff3cfff : persistent_ram
+9ff3d000-9ff3dfff : persistent_ram
+9ff3e000-9ff3efff : persistent_ram
+9ff3f000-9ff3ffff : persistent_ram
+9ff40000-9ff40fff : persistent_ram
+9ff41000-9ff41fff : persistent_ram
+9ff42000-9ff42fff : persistent_ram
+9ff43000-9ff43fff : persistent_ram
+9ff44000-9ff44fff : persistent_ram
+9ff45000-9ff45fff : persistent_ram
+9ff46000-9ff46fff : persistent_ram
+9ff47000-9ff47fff : persistent_ram
+9ff48000-9ff48fff : persistent_ram
+9ff49000-9ff49fff : persistent_ram
+9ff4a000-9ff4afff : persistent_ram
+9ff4b000-9ff4bfff : persistent_ram
+9ff4c000-9ff4cfff : persistent_ram
+9ff4d000-9ff4dfff : persistent_ram
+9ff4e000-9ff4efff : persistent_ram
+9ff4f000-9ff4ffff : persistent_ram
+9ff50000-9ff50fff : persistent_ram
+9ff51000-9ff51fff : persistent_ram
+9ff52000-9ff52fff : persistent_ram
+9ff53000-9ff53fff : persistent_ram
+9ff54000-9ff54fff : persistent_ram
+9ff55000-9ff55fff : persistent_ram
+9ff56000-9ff56fff : persistent_ram
+9ff57000-9ff57fff : persistent_ram
+9ff58000-9ff58fff : persistent_ram
+9ff59000-9ff59fff : persistent_ram
+9ff5a000-9ff5afff : persistent_ram
+9ff5b000-9ff5bfff : persistent_ram
+9ff5c000-9ff5cfff : persistent_ram
+9ff5d000-9ff5dfff : persistent_ram
+9ff5e000-9ff5efff : persistent_ram
+9ff5f000-9ff5ffff : persistent_ram
+9ff60000-9ff60fff : persistent_ram
+9ff61000-9ff61fff : persistent_ram
+9ff62000-9ff62fff : persistent_ram
+9ff63000-9ff63fff : persistent_ram
+9ff64000-9ff64fff : persistent_ram
+9ff65000-9ff65fff : persistent_ram
+9ff66000-9ff66fff : persistent_ram
+9ff67000-9ff67fff : persistent_ram
+9ff68000-9ff68fff : persistent_ram
+9ff69000-9ff69fff : persistent_ram
+9ff6a000-9ff6afff : persistent_ram
+9ff6b000-9ff6bfff : persistent_ram
+9ff6c000-9ff6cfff : persistent_ram
+9ff6d000-9ff6dfff : persistent_ram
+9ff6e000-9ff6efff : persistent_ram
+9ff6f000-9ff6ffff : persistent_ram
+9ff70000-9ff70fff : persistent_ram
+9ff71000-9ff71fff : persistent_ram
+9ff72000-9ff72fff : persistent_ram
+9ff73000-9ff73fff : persistent_ram
+9ff74000-9ff74fff : persistent_ram
+9ff75000-9ff75fff : persistent_ram
+9ff76000-9ff76fff : persistent_ram
+9ff77000-9fff6fff : persistent_ram
+9fff7000-9fff7fff : persistent_ram
+9fff8000-9fffffff : persistent_ram
+a0000000-ffffffff : System RAM
