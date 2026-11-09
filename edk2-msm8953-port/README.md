@@ -10,7 +10,7 @@ the vendor DXE drivers edk2-msm uses on other SoCs come from those phones' stock
 Values and where they came from:
 - RAM, reserved regions, GIC, timer: a Mi A1's /proc/iomem and FDT (see ../upstream-hakios-port/devices-tissot/reference/memory-map.md). Only RAM at or above 0x8ef00000 is used.
 - Framebuffer 0x90001000, 1080x1920x32: FDT splash_region and panel name; that LK scans out there is **assumed**.
-- Boot image base 0x80000000, kernel +0x8000, ramdisk +0x01000000, tags +0x100, page 2048: usual MSM8953 LK layout, **not verified** against a Mi A1 boot.img.
+- Boot image header (base 0x80000000, kernel +0x8000, ramdisk +0x01000000, tags +0x100, page 2048, v0, Image.gz-dtb) matches a Mi A1 TWRP boot.img supplied by the owner. The appended DTB is the pristine QRD SKU3 DTB taken from that image (msm-id 0x125, board-id 0x1000b).
 - UEFI FD at 0xA0000000 (32 MiB): chosen from free RAM, untested.
 
 Apply: copy the directories over an edk2-msm checkout, then `./build.sh -d tissot` (needs: clang, lld, gcc-aarch64-linux-gnu, gettext, nasm, python3, uuid-dev;
